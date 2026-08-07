@@ -11,6 +11,17 @@ import type {
 	PaperRecord,
 	PaperStatus,
 } from './types';
+import {
+	isLiteratureType,
+	isPaperAiStatus,
+	PAPER_AI_PROPERTY_SCHEMA,
+	PAPER_PROPERTY_SCHEMA_VERSION,
+} from './paper-property-schema';
+import type {
+	PaperAiProperties,
+	PaperAiSystemProperties,
+	PaperPropertyUpdates,
+} from './paper-property-schema';
 
 const INDEX_FILENAME = 'index.md';
 const SOURCE_PDF_FILENAME = 'source.pdf';
@@ -101,6 +112,51 @@ export class PaperLibraryRepository {
 		await this.app.workspace.getLeaf('tab').openFile(file);
 	}
 
+	async updatePaperProperties(
+		paper: PaperRecord,
+		updates: PaperPropertyUpdates,
+	): Promise<PaperRecord> {
+		const file = this.app.vault.getAbstractFileByPath(paper.indexPath);
+		if (!(file instanceof TFile)) {
+			throw new Error(`Index note not found: ${paper.indexPath}`);
+		}
+
+		const updatedAt = new Date().toISOString();
+		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+			const properties = frontmatter as Frontmatter;
+			for (const field of PAPER_AI_PROPERTY_SCHEMA) {
+				if (hasOwn(updates, field.id)) {
+					writeFrontmatterValue(
+						properties,
+						field.frontmatterKey,
+						updates[field.id],
+					);
+				}
+			}
+
+			for (const field of AI_SYSTEM_PROPERTY_SCHEMA) {
+				if (hasOwn(updates, field.id)) {
+					writeFrontmatterValue(
+						properties,
+						field.frontmatterKey,
+						updates[field.id],
+					);
+				}
+			}
+
+			properties.ai_schema_version =
+				updates.aiSchemaVersion ?? PAPER_PROPERTY_SCHEMA_VERSION;
+			properties.updated_at = updatedAt;
+		});
+
+		const updatedPaper = await this.readPaperRecord(file, true);
+		if (!updatedPaper) {
+			throw new Error(`Could not read updated paper: ${paper.indexPath}`);
+		}
+
+		return updatedPaper;
+	}
+
 	private get libraryFolder(): string {
 		return normalizePath(this.getLibraryFolder());
 	}
@@ -146,9 +202,14 @@ export class PaperLibraryRepository {
 		);
 
 		return {
+			...paperPropertiesFromFrontmatter(
+				{
+					title,
+					authors: [],
+				},
+				title,
+			),
 			id,
-			title,
-			authors: [],
 			status: 'unread',
 			originalFilename: file.name,
 			fileHash,
@@ -160,9 +221,13 @@ export class PaperLibraryRepository {
 		};
 	}
 
-	private async readPaperRecord(file: TFile): Promise<PaperRecord | null> {
-		const cachedFrontmatter =
-			this.app.metadataCache.getFileCache(file)?.frontmatter;
+	private async readPaperRecord(
+		file: TFile,
+		fresh = false,
+	): Promise<PaperRecord | null> {
+		const cachedFrontmatter = fresh
+			? null
+			: this.app.metadataCache.getFileCache(file)?.frontmatter;
 		const frontmatter =
 			cachedFrontmatter ?? (await this.readFrontmatter(file));
 
@@ -194,10 +259,8 @@ export class PaperLibraryRepository {
 			this.app.vault.getAbstractFileByPath(annotatedPdfPath) instanceof TFile;
 
 		return {
+			...paperPropertiesFromFrontmatter(frontmatter, title),
 			id,
-			title,
-			authors: stringArray(frontmatter.authors),
-			year: numberValue(frontmatter.year),
 			status: paperStatus(frontmatter.status),
 			originalFilename,
 			fileHash: stringValue(frontmatter.file_hash),
@@ -256,6 +319,10 @@ paper_id: ${yamlString(input.id)}
 title: ${yamlString(input.title)}
 authors: []
 status: unread
+ai_status: not_started
+ai_schema_version: ${PAPER_PROPERTY_SCHEMA_VERSION}
+ai_model: ""
+ai_error: ""
 original_filename: ${yamlString(input.originalFilename)}
 file_hash: ${yamlString(input.fileHash)}
 source_pdf: ${yamlString('[[source.pdf]]')}
@@ -312,6 +379,68 @@ function stringArray(value: unknown): string[] {
 
 function numberValue(value: unknown): number | undefined {
 	return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+const AI_SYSTEM_PROPERTY_SCHEMA = [
+	{ id: 'aiStatus', frontmatterKey: 'ai_status' },
+	{ id: 'aiSchemaVersion', frontmatterKey: 'ai_schema_version' },
+	{ id: 'aiModel', frontmatterKey: 'ai_model' },
+	{ id: 'aiUpdatedAt', frontmatterKey: 'ai_updated_at' },
+	{ id: 'aiError', frontmatterKey: 'ai_error' },
+] as const;
+
+function paperPropertiesFromFrontmatter(
+	frontmatter: Frontmatter,
+	fallbackTitle: string,
+): PaperAiProperties & PaperAiSystemProperties {
+	return {
+		literatureType: isLiteratureType(frontmatter.literature_type)
+			? frontmatter.literature_type
+			: null,
+		journalName: stringValue(frontmatter.journal),
+		year: numberValue(frontmatter.year) ?? null,
+		title: stringValue(frontmatter.title) || fallbackTitle,
+		abstract: stringValue(frontmatter.abstract),
+		keywords: stringArray(frontmatter.keywords),
+		authors: stringArray(frontmatter.authors),
+		researchBackground: stringValue(frontmatter.research_background),
+		researchResults: stringValue(frontmatter.research_results),
+		researchMethods: stringValue(frontmatter.research_methods),
+		paperSummary: stringValue(frontmatter.paper_summary),
+		innovations: stringValue(frontmatter.innovations),
+		applicationValue: stringValue(frontmatter.application_value),
+		limitations: stringValue(frontmatter.limitations),
+		futureDirections: stringValue(frontmatter.future_directions),
+		aiStatus: isPaperAiStatus(frontmatter.ai_status)
+			? frontmatter.ai_status
+			: 'not_started',
+		aiSchemaVersion:
+			numberValue(frontmatter.ai_schema_version) ??
+			PAPER_PROPERTY_SCHEMA_VERSION,
+		aiModel: stringValue(frontmatter.ai_model),
+		aiUpdatedAt: stringValue(frontmatter.ai_updated_at) || null,
+		aiError: stringValue(frontmatter.ai_error),
+	};
+}
+
+function writeFrontmatterValue(
+	frontmatter: Frontmatter,
+	key: string,
+	value: unknown,
+): void {
+	if (value === null || value === undefined) {
+		delete frontmatter[key];
+		return;
+	}
+
+	frontmatter[key] = value;
+}
+
+function hasOwn<T extends object>(
+	value: T,
+	key: PropertyKey,
+): key is keyof T {
+	return Object.prototype.hasOwnProperty.call(value, key);
 }
 
 function paperStatus(value: unknown): PaperStatus {

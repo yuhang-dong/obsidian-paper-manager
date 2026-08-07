@@ -9,10 +9,12 @@ import PaperManagerPlugin from './main';
 
 export interface PaperManagerSettings {
 	libraryFolder: string;
+	aiApiKey: string;
 }
 
 export const DEFAULT_SETTINGS: PaperManagerSettings = {
 	libraryFolder: 'Papers',
+	aiApiKey: '',
 };
 
 export class PaperManagerSettingTab extends PluginSettingTab {
@@ -35,6 +37,22 @@ export class PaperManagerSettingTab extends PluginSettingTab {
 					placeholder: DEFAULT_SETTINGS.libraryFolder,
 				},
 			},
+			{
+				name: 'Billing key',
+				desc: 'Billing key for this plugin (for example, paper_manager_xxx). Stored in the Obsidian plugin settings file and not encrypted.',
+				render: (setting) => {
+					setting.addText((text) => {
+						text.inputEl.type = 'password';
+						text
+							.setPlaceholder('Billing key')
+							.setValue(this.plugin.settings.aiApiKey)
+							.onChange(async (value) => {
+								this.plugin.settings.aiApiKey = value.trim();
+								await this.plugin.saveSettings();
+							});
+					});
+				},
+			},
 		];
 	}
 
@@ -42,16 +60,25 @@ export class PaperManagerSettingTab extends PluginSettingTab {
 		if (key === 'libraryFolder') {
 			return this.plugin.settings.libraryFolder;
 		}
+		if (key === 'aiApiKey') {
+			return this.plugin.settings.aiApiKey;
+		}
 
 		return undefined;
 	}
 
 	async setControlValue(key: string, value: unknown): Promise<void> {
-		if (key !== 'libraryFolder' || typeof value !== 'string') {
+		if (typeof value !== 'string') {
 			return;
 		}
 
-		this.plugin.settings.libraryFolder = this.normalizeLibraryFolder(value);
+		if (key === 'libraryFolder') {
+			this.plugin.settings.libraryFolder = this.normalizeLibraryFolder(value);
+		} else if (key === 'aiApiKey') {
+			this.plugin.settings.aiApiKey = value.trim();
+		} else {
+			return;
+		}
 		await this.plugin.saveSettings();
 	}
 
@@ -73,6 +100,22 @@ export class PaperManagerSettingTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					}),
 			);
+
+		new Setting(containerEl)
+			.setName('Billing key')
+			.setDesc(
+				'Billing key for this plugin (for example, paper_manager_xxx). Stored in the Obsidian plugin settings file and not encrypted.',
+			)
+			.addText((text) => {
+				text.inputEl.type = 'password';
+				text
+					.setPlaceholder('Billing key')
+					.setValue(this.plugin.settings.aiApiKey)
+					.onChange(async (value) => {
+						this.plugin.settings.aiApiKey = value.trim();
+						await this.plugin.saveSettings();
+					});
+			});
 	}
 
 	private normalizeLibraryFolder(value: string): string {

@@ -15,8 +15,7 @@ never a title or uploaded filename.
 ├── index.md
 ├── source.pdf
 ├── annotated.pdf
-├── annotations.json
-└── analysis.json
+└── annotations.json
 ```
 
 `paper_id` must also be stored in `index.md` frontmatter so identity survives a
@@ -35,8 +34,8 @@ Treat the PDF representations as separate layers:
   annotations. It is safe to regenerate.
 - `index.md` embeds `![[annotated.pdf]]`. Obsidian's native PDF viewer is the
   read-only/quick-preview surface; it does not read `annotations.json`.
-- `analysis.json` stores structured AI output and is not the canonical source of
-  user-authored annotations.
+- `index.md` properties are the canonical paper metadata and AI-analysis record.
+  Keep annotations separate because they contain PDF geometry and viewer state.
 
 On initial import, write the uploaded bytes to both `source.pdf` and
 `annotated.pdf` so the Markdown embed always targets a stable filename. Editing
@@ -60,6 +59,46 @@ Use the Vault API for visible Vault files, including `createBinary`,
 `readBinary`, and `modifyBinary`. Do not store user PDFs or the only copy of user
 data inside `.obsidian/plugins/paper-manager`, because that directory belongs to
 the installed plugin and may be removed.
+
+## Paper property schema
+
+`index.md` frontmatter is the single source of truth for bibliographic metadata
+and AI-generated analysis. The property schema defines stable field IDs,
+frontmatter keys, Obsidian property types, and Paper Manager table editors.
+
+Use Obsidian-compatible property types: text, list, number, checkbox, date, and
+datetime. Literature type is stored as text but rendered by Paper Manager as a
+controlled select. Authors and keywords are lists; publication year is a
+number. Long-form analysis remains a text property and is edited through Paper
+Manager's multiline editor. Checkbox fields are intended for boolean user state
+such as verification or favorites, not for long-form AI output.
+
+## AI integration
+
+Use the Vercel AI SDK and AI Elements when the real analysis UI and streaming
+workflow are implemented. The Worker exposes a generic `/api/chat` route rather
+than a paper-analysis-specific endpoint. Keep one Worker base URL as a source
+constant, use it for both billing and chat, and pass the paper schema, prompts,
+messages, and optional tools through the generic chat request. Read the Paper
+Manager billing key from plugin settings. The key is stored in Obsidian's plugin
+settings data and is not encrypted; never write it into a paper note or include
+it in logs.
+
+The paid product type is `paper_manager`, and its allowed chat model is
+`openai/gpt-5.6-luna`. The Worker remains a generic authenticated model proxy;
+Paper Manager owns the analysis system prompt, paper context, output schema,
+and validation rules.
+
+Before starting an AI document request, generate one request ID and call the
+billing Worker's `/api/usage/start` endpoint with the key, request ID, and
+`paper_manager` product type. Keep the same request ID if that billing call is
+retried so a network retry cannot become a second logical charge. Validate the
+response and pass its usage token to the AI endpoint in the `x-usage-token`
+header. Keep usage tokens in memory only and never persist or log them.
+
+AI jobs update `ai_status`, `ai_schema_version`, `ai_model`, `ai_updated_at`, and
+`ai_error` in `index.md`. Validate the structured response before applying all
+result fields through the repository's single frontmatter update operation.
 
 ## Packaging constraint
 

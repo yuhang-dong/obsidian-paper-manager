@@ -1,10 +1,14 @@
+import type {
+	PaperAiProperties,
+	PaperAiSystemProperties,
+} from './paper-property-schema';
+
 export type PaperStatus = 'unread' | 'reading' | 'finished';
 
-export interface PaperRecord {
+export interface PaperRecord
+	extends PaperAiProperties,
+		PaperAiSystemProperties {
 	id: string;
-	title: string;
-	authors: string[];
-	year?: number;
 	status: PaperStatus;
 	originalFilename: string;
 	fileHash: string;
