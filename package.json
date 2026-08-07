@@ -50,6 +50,7 @@
 		"@embedpdf/plugin-export": "^2.14.4",
 		"@embedpdf/plugin-i18n": "^2.14.4",
 		"@embedpdf/react-pdf-viewer": "^2.14.4",
+		"@embedpdf/models": "^2.14.4",
 		"@tanstack/react-table": "^9.0.0",
 		"ai": "^7.0.56",
 		"class-variance-authority": "^0.7.1",

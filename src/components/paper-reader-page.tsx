@@ -16,11 +16,26 @@ import {
 	type AnnotationEvent,
 	type TrackedAnnotation,
 } from '@embedpdf/plugin-annotation';
+import {
+	PdfAnnotationReplyType,
+	PdfAnnotationSubtype,
+	type PdfDocumentObject,
+	type PdfEngine,
+	type PdfPageTextRuns,
+	type Rect,
+} from '@embedpdf/models';
 import { DocumentManagerPlugin } from '@embedpdf/plugin-document-manager';
 import { ExportPlugin } from '@embedpdf/plugin-export';
 import pdfiumWasmUrl from '@embedpdf/pdfium/pdfium.wasm';
 import { App, getLanguage, Notice, TFile } from 'obsidian';
 import { PaperReaderStorage } from '@/papers/paper-reader-storage';
+import {
+	answerPaperQuestion,
+	arrayBufferToDataUrl,
+	buildQaTurnsFromThread,
+	getUnansweredQuestion,
+	QA_BOT_NAME,
+} from '@/ai/paper-qa';
 
 const HIDDEN_VIEWER_CATEGORIES = [
 	'document-menu',
@@ -43,6 +58,7 @@ const HIDDEN_VIEWER_CATEGORIES = [
 interface PaperReaderPageProps {
 	app: App;
 	pdfPath: string;
+	getBillingKey: () => string;
 }
 
 interface PdfSourceState {
@@ -50,9 +66,17 @@ interface PdfSourceState {
 	error: string | null;
 }
 
+interface PendingQuestion {
+	documentId: string;
+	pageIndex: number;
+	annotationId: string;
+	question: string;
+}
+
 export function PaperReaderPage({
 	app,
 	pdfPath,
+	getBillingKey,
 }: PaperReaderPageProps) {
 	const viewerRef = useRef<PDFViewerRef>(null);
 	const storage = useMemo(
@@ -65,6 +89,13 @@ export function PaperReaderPage({
 	});
 	const [registry, setRegistry] = useState<PluginRegistry | null>(null);
 	const isManagedPaper = storage.isManagedPaper();
+	const qaQueueRef = useRef<PendingQuestion[]>([]);
+	const qaActiveIdsRef = useRef<Set<string>>(new Set());
+	const qaRunningRef = useRef(false);
+	const pdfDataUrlRef = useRef<string | null>(null);
+	const pageTextRunsCacheRef = useRef<
+		Map<string, PdfPageTextRuns>
+	>(new Map());
 
 	useEffect(() => {
 		let cancelled = false;
@@ -148,6 +179,191 @@ export function PaperReaderPage({
 			}
 		};
 
+		const getPdfDataUrl = async (): Promise<string> => {
+			if (pdfDataUrlRef.current) {
+				return pdfDataUrlRef.current;
+			}
+			const file = app.vault.getAbstractFileByPath(storage.sourcePdfPath);
+			if (!(file instanceof TFile)) {
+				throw new Error('PDF 文件不存在');
+			}
+			const data = await app.vault.readBinary(file);
+			const dataUrl = await arrayBufferToDataUrl(data, 'application/pdf');
+			pdfDataUrlRef.current = dataUrl;
+			return dataUrl;
+		};
+
+		const processQaQueue = async (): Promise<void> => {
+			if (qaRunningRef.current) {
+				return;
+			}
+			qaRunningRef.current = true;
+			try {
+				while (qaQueueRef.current.length > 0) {
+					const pending = qaQueueRef.current.shift();
+					if (!pending) {
+						break;
+					}
+					try {
+						const billingKey = getBillingKey().trim();
+						if (!billingKey) {
+							new Notice(
+								'请先在插件设置中添加 billing key 后再提问。',
+							);
+							continue;
+						}
+
+						const scope = annotationApi.forDocument(pending.documentId);
+						const tracked = scope
+							.getAnnotations()
+							.find((item) => item.object.id === pending.annotationId);
+						if (!tracked) {
+							continue;
+						}
+
+						const contents =
+							typeof tracked.object.contents === 'string'
+								? tracked.object.contents
+								: '';
+						const question =
+							getUnansweredQuestion(contents) ?? pending.question;
+
+						// Resolve the thread root so replies always hang under
+						// the original comment instead of nesting.
+						let rootId = pending.annotationId;
+						for (let depth = 0; depth < 10; depth++) {
+							const parent = scope
+								.getAnnotations()
+								.find((item) => item.object.id === rootId);
+							const parentReplyTo = parent
+								? (parent.object as { inReplyToId?: string })
+										.inReplyToId
+								: undefined;
+							if (!parentReplyTo) {
+								break;
+							}
+							rootId = parentReplyTo;
+						}
+
+						const rootAnnotation = scope
+							.getAnnotations()
+							.find((item) => item.object.id === rootId);
+						const replies = scope
+							.getAnnotations()
+							.filter(
+								(item) =>
+									(item.object as { inReplyToId?: string })
+										.inReplyToId === rootId,
+							)
+							.map((item) => ({
+								contents:
+									typeof item.object.contents === 'string'
+										? item.object.contents
+										: '',
+								author: item.object.author,
+								created: item.object.created,
+							}));
+
+						const allTurns = buildQaTurnsFromThread(
+							typeof rootAnnotation?.object.contents === 'string'
+								? rootAnnotation.object.contents
+								: '',
+							replies,
+						);
+						const open = allTurns[allTurns.length - 1];
+						const thread =
+							open && !open.answer
+								? allTurns.slice(0, -1)
+								: allTurns;
+						const newQuestion = (
+							open && !open.answer ? open.question : question
+						).trim();
+						if (!newQuestion) {
+							continue;
+						}
+
+						const engine = registry.getEngine();
+						const document = documentApi.getDocument(
+							pending.documentId,
+						);
+						const selectedText = document
+							? await extractAnnotationText(
+									engine,
+									document,
+									pending.pageIndex,
+									rootAnnotation?.object.rect ??
+										tracked.object.rect,
+									pageTextRunsCacheRef.current,
+								)
+							: '';
+						const context = selectedText
+							? `用户选中了论文第 ${pending.pageIndex + 1} 页中的这段文字：\n${selectedText}`
+							: undefined;
+
+						const pdfDataUrl = await getPdfDataUrl();
+						new Notice(
+							`PP 正在回答：${newQuestion.slice(0, 60)}…`,
+						);
+						const result = await answerPaperQuestion({
+							billingKey,
+							pdfDataUrl,
+							pdfFilename:
+								pdfPath.split('/').pop() ?? 'paper.pdf',
+							thread,
+							newQuestion,
+							context,
+						});
+
+						const baseRect =
+							rootAnnotation?.object.rect ?? tracked.object.rect;
+						const cascadeOffset = replies.length * 16;
+						const replyId = crypto.randomUUID();
+						scope.createAnnotation(pending.pageIndex, {
+							id: replyId,
+							type: PdfAnnotationSubtype.TEXT,
+							pageIndex: pending.pageIndex,
+							rect: {
+								origin: {
+									x: baseRect.origin.x + cascadeOffset,
+									y: baseRect.origin.y + cascadeOffset,
+								},
+								size: baseRect.size,
+							},
+							contents: result.answer,
+							author: QA_BOT_NAME,
+							inReplyToId: rootId,
+							replyType: PdfAnnotationReplyType.Reply,
+							created: new Date(),
+							modified: new Date(),
+						});
+						new Notice(
+							`PP 已回答 · ${result.usage.creditsCharged} credit(s) · ${result.usage.remainingCredits} remaining`,
+						);
+					} catch (error) {
+						new Notice(`PP 回答失败：${errorMessage(error)}`);
+					} finally {
+						qaActiveIdsRef.current.delete(pending.annotationId);
+					}
+				}
+			} finally {
+				qaRunningRef.current = false;
+			}
+		};
+
+		const enqueueQuestion = (pending: PendingQuestion): void => {
+			if (
+				qaActiveIdsRef.current.has(pending.annotationId) ||
+				qaQueueRef.current.some(
+					(item) => item.annotationId === pending.annotationId,
+				)
+			) {
+				return;
+			}
+			qaActiveIdsRef.current.add(pending.annotationId);
+			qaQueueRef.current.push(pending);
+			void processQaQueue();
+		};
+
 		const unsubscribeAnnotationEvents = annotationApi.onAnnotationEvent(
 			(event: AnnotationEvent) => {
 				if (
@@ -156,6 +372,43 @@ export function PaperReaderPage({
 					initialImportIds.delete(event.annotation.id)
 				) {
 					return;
+				}
+
+				if (
+					(event.type === 'create' || event.type === 'update') &&
+					event.committed
+				) {
+					const contents =
+						typeof event.annotation.contents === 'string'
+							? event.annotation.contents
+							: event.type === 'update' &&
+								typeof event.patch.contents === 'string'
+								? event.patch.contents
+								: '';
+					const question = getUnansweredQuestion(contents);
+					if (question && !disposed) {
+						const scope =
+							annotationApi.forDocument(event.documentId);
+						const hasPpReply = scope
+							.getAnnotations()
+							.some(
+								(item) =>
+									item.object.type ===
+										PdfAnnotationSubtype.TEXT &&
+									item.object.author === QA_BOT_NAME &&
+									(item.object as { inReplyToId?: string })
+										.inReplyToId === event.annotation.id,
+							);
+						if (hasPpReply) {
+							return;
+						}
+						enqueueQuestion({
+							documentId: event.documentId,
+							pageIndex: event.pageIndex,
+							annotationId: event.annotation.id,
+							question,
+						});
+					}
 				}
 
 				if (
@@ -212,7 +465,7 @@ export function PaperReaderPage({
 
 		const unsubscribe = documentApi.onDocumentOpened(
 			(documentState: { id: string }) => {
-			void importSavedAnnotations(documentState.id);
+				void importSavedAnnotations(documentState.id);
 			},
 		);
 
@@ -396,4 +649,40 @@ function getEmbedPdfLocale(obsidianLanguage: string): string {
 
 function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
+}
+
+async function extractAnnotationText(
+	engine: PdfEngine,
+	document: PdfDocumentObject,
+	pageIndex: number,
+	rect: Rect,
+	cache: Map<string, PdfPageTextRuns>,
+): Promise<string> {
+	const page = document.pages[pageIndex];
+	if (!page) {
+		return '';
+	}
+
+	const cacheKey = `${document.id}:${pageIndex}`;
+	let textRuns = cache.get(cacheKey);
+	if (!textRuns) {
+		textRuns = await engine.getPageTextRuns(document, page).toPromise();
+		cache.set(cacheKey, textRuns);
+	}
+
+	return textRuns.runs
+		.filter((run) => rectsIntersect(run.rect, rect))
+		.map((run) => run.text)
+		.join('')
+		.replace(/\s+/g, ' ')
+		.trim();
+}
+
+function rectsIntersect(left: Rect, right: Rect): boolean {
+	return (
+		left.origin.x < right.origin.x + right.size.width &&
+		left.origin.x + left.size.width > right.origin.x &&
+		left.origin.y < right.origin.y + right.size.height &&
+		left.origin.y + left.size.height > right.origin.y
+	);
 }

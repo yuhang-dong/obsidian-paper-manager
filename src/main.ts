@@ -37,7 +37,7 @@ export default class PaperManagerPlugin extends Plugin {
 		);
 		this.registerView(
 			PAPER_READER_VIEW_TYPE,
-			(leaf) => new PaperReaderView(leaf),
+			(leaf) => new PaperReaderView(leaf, this),
 		);
 
 		this.addRibbonIcon('library', 'Open paper library', () => {

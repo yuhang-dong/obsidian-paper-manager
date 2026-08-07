@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { ItemView, type ViewStateResult, WorkspaceLeaf } from 'obsidian';
 import { PaperReaderPage } from '@/components/paper-reader-page';
+import type PaperManagerPlugin from '@/main';
 
 export const PAPER_READER_VIEW_TYPE = 'paper-manager-reader';
 
@@ -12,9 +13,11 @@ interface PaperReaderViewState {
 export class PaperReaderView extends ItemView {
 	private reactRoot: Root | null = null;
 	private pdfPath = '';
+	private readonly plugin: PaperManagerPlugin;
 
-	constructor(leaf: WorkspaceLeaf) {
+	constructor(leaf: WorkspaceLeaf, plugin: PaperManagerPlugin) {
 		super(leaf);
+		this.plugin = plugin;
 		this.navigation = true;
 	}
 
@@ -78,7 +81,11 @@ export class PaperReaderView extends ItemView {
 
 		this.reactRoot.render(
 			<StrictMode>
-				<PaperReaderPage app={this.app} pdfPath={this.pdfPath} />
+				<PaperReaderPage
+					app={this.app}
+					pdfPath={this.pdfPath}
+					getBillingKey={() => this.plugin.settings.aiApiKey}
+				/>
 			</StrictMode>,
 		);
 	}
