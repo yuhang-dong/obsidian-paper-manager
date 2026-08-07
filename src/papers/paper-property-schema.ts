@@ -53,6 +53,26 @@ export type PaperPropertyUpdates = Partial<
 
 export type PaperAiPropertyId = keyof PaperAiProperties;
 
+/**
+ * Long-form analysis sections that are written into the note body
+ * (`## Overview`) instead of frontmatter.
+ */
+export const PAPER_BODY_SECTION_FIELD_IDS: ReadonlySet<PaperAiPropertyId> =
+	new Set<PaperAiPropertyId>([
+		'researchBackground',
+		'researchResults',
+		'researchMethods',
+		'paperSummary',
+		'innovations',
+		'applicationValue',
+		'limitations',
+		'futureDirections',
+	]);
+
+export function isBodySectionField(id: PaperAiPropertyId): boolean {
+	return PAPER_BODY_SECTION_FIELD_IDS.has(id);
+}
+
 export type ObsidianPropertyType =
 	| 'text'
 	| 'list'

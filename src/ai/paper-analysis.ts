@@ -137,6 +137,10 @@ export async function analyzePaper({
 			aiUpdatedAt: new Date().toISOString(),
 			aiError: '',
 		});
+		currentPaper = await repository.updatePaperOverview(
+			currentPaper,
+			analysis,
+		);
 
 		return { paper: currentPaper, usage };
 	} catch (error) {
@@ -262,6 +266,8 @@ Output rules:
 - Call savePaperAnalysis exactly once and do not answer with prose outside the tool call.
 - Return every schema field.
 - Write researchBackground, researchResults, researchMethods, paperSummary, innovations, applicationValue, limitations, and futureDirections in concise Simplified Chinese.
+- These long-form sections are rendered as Obsidian markdown in the note body. Use markdown freely: bullet or numbered lists, bold/italic, blockquotes, wikilinks, and callouts such as > [!tip] or > [!warning]. Prefer lists over walls of text.
+- Do not emit level-2 (##) or level-3 (###) headings; the note already provides section headings. If you need sub-structure, use level-5 (#####) headings at most, or use lists.
 - Preserve the paper's original title, author names, journal name, and author-supplied keywords instead of translating them.
 - Preserve the original abstract when one is present. If no abstract is present, leave abstract empty.
 - Keep authors in publication order and remove affiliations and footnote markers.

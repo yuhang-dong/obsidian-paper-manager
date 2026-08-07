@@ -11,11 +11,16 @@ import type {
 	PaperRecord,
 } from './types';
 import {
+	isBodySectionField,
 	isLiteratureType,
 	isPaperAiStatus,
 	PAPER_AI_PROPERTY_SCHEMA,
 	PAPER_PROPERTY_SCHEMA_VERSION,
 } from './paper-property-schema';
+import {
+	buildOverviewMarkdown,
+	replaceOverviewSection,
+} from './paper-overview';
 import type {
 	PaperAiProperties,
 	PaperAiSystemProperties,
@@ -168,6 +173,11 @@ export class PaperLibraryRepository {
 			const properties = frontmatter as Frontmatter;
 			for (const field of PAPER_AI_PROPERTY_SCHEMA) {
 				if (hasOwn(updates, field.id)) {
+					// Long-form analysis sections live in the note body
+					// (`updatePaperOverview`), not in frontmatter.
+					if (isBodySectionField(field.id)) {
+						continue;
+					}
 					writeFrontmatterValue(
 						properties,
 						field.frontmatterKey,
@@ -190,6 +200,38 @@ export class PaperLibraryRepository {
 				updates.aiSchemaVersion ?? PAPER_PROPERTY_SCHEMA_VERSION;
 			properties.updated_at = updatedAt;
 		});
+
+		const updatedPaper = await this.readPaperRecord(file, true);
+		if (!updatedPaper) {
+			throw new Error(`Could not read updated paper: ${paper.indexPath}`);
+		}
+
+		return updatedPaper;
+	}
+
+	async updatePaperOverview(
+		paper: PaperRecord,
+		analysis: PaperAiProperties,
+	): Promise<PaperRecord> {
+		const file = this.app.vault.getAbstractFileByPath(paper.indexPath);
+		if (!(file instanceof TFile)) {
+			throw new Error(`Index note not found: ${paper.indexPath}`);
+		}
+
+		// Migrate: long-form sections no longer belong in frontmatter.
+		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+			const properties = frontmatter as Frontmatter;
+			for (const field of PAPER_AI_PROPERTY_SCHEMA) {
+				if (isBodySectionField(field.id)) {
+					delete properties[field.frontmatterKey];
+				}
+			}
+		});
+
+		const overview = buildOverviewMarkdown(analysis);
+		await this.app.vault.process(file, (content) =>
+			replaceOverviewSection(content, overview),
+		);
 
 		const updatedPaper = await this.readPaperRecord(file, true);
 		if (!updatedPaper) {
@@ -410,6 +452,10 @@ updated_at: ${yamlString(input.createdAt)}
 ---
 
 # ${markdownHeading(input.title)}
+
+## Overview
+
+## Paper
 
 ![[annotated.pdf]]
 
