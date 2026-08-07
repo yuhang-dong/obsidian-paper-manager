@@ -151,49 +151,42 @@ export function PaperLibraryPage({ repository }: PaperLibraryPageProps) {
 				onChange={(event) => void handleFileSelection(event)}
 			/>
 
-			<header className="flex flex-wrap items-start justify-between gap-4 border-b border-border px-6 py-5">
-				<div className="space-y-1">
-					<div className="flex items-center gap-2">
-						<h1 className="text-xl font-semibold tracking-tight">Paper library</h1>
-						<Badge variant="secondary">MVP</Badge>
+			<main className="flex flex-1 p-6">
+				<section className="flex-1 overflow-hidden rounded-lg border border-border bg-card text-card-foreground shadow-xs">
+					<div className="flex flex-wrap items-center justify-between gap-2 border-b border-border p-3">
+						<div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+							<div className="relative min-w-56 flex-1 sm:max-w-sm">
+								<Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+								<Input
+									aria-label="Search papers"
+									placeholder="Search papers"
+									className="pl-9"
+									value={query}
+									onChange={(event) => setQuery(event.target.value)}
+								/>
+							</div>
+							<Button variant="outline" disabled>
+								<SlidersHorizontal />
+								Filter
+							</Button>
+							<Button variant="outline" disabled>
+								<Columns3 />
+								Columns
+							</Button>
+						</div>
+						<Button
+							className="mod-cta"
+							onClick={chooseFiles}
+							disabled={isImporting}
+						>
+							{isImporting ? (
+								<LoaderCircle className="animate-spin" />
+							) : (
+								<Upload />
+							)}
+							{isImporting ? 'Importing…' : 'Import papers'}
+						</Button>
 					</div>
-					<p className="text-sm text-muted-foreground">
-						Import, organize, read, and synthesize academic papers.
-					</p>
-				</div>
-				<Button onClick={chooseFiles} disabled={isImporting}>
-					{isImporting ? (
-						<LoaderCircle className="animate-spin" />
-					) : (
-						<Upload />
-					)}
-					{isImporting ? 'Importing…' : 'Import papers'}
-				</Button>
-			</header>
-
-			<main className="flex flex-1 flex-col gap-4 p-6">
-				<div className="flex flex-wrap items-center gap-2">
-					<div className="relative min-w-56 flex-1 sm:max-w-sm">
-						<Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-						<Input
-							aria-label="Search papers"
-							placeholder="Search papers"
-							className="pl-9"
-							value={query}
-							onChange={(event) => setQuery(event.target.value)}
-						/>
-					</div>
-					<Button variant="outline" disabled>
-						<SlidersHorizontal />
-						Filter
-					</Button>
-					<Button variant="outline" disabled>
-						<Columns3 />
-						Columns
-					</Button>
-				</div>
-
-				<section className="overflow-hidden rounded-lg border border-border bg-card text-card-foreground shadow-xs">
 					<Table>
 						<TableHeader>
 							<TableRow className="hover:bg-transparent">

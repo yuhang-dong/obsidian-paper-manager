@@ -23,12 +23,15 @@ import { App, getLanguage, Notice, TFile } from 'obsidian';
 import { PaperReaderStorage } from '@/papers/paper-reader-storage';
 
 const HIDDEN_VIEWER_CATEGORIES = [
+	'document-menu',
 	'document-open',
 	'document-export',
 	'document-print',
 	'document-fullscreen',
 	'document-protect',
 	'document-capture',
+	'page-settings',
+	'mode-insert',
 	'redaction',
 	'form',
 	'insert-attachment',
