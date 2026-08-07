@@ -30,6 +30,18 @@ const ANNOTATIONS_FILENAME = 'annotations.json';
 
 type Frontmatter = Record<string, unknown>;
 
+const INTERNAL_FRONTMATTER_KEYS = new Set<string>([
+	'paper_manager',
+	'schema_version',
+	'paper_id',
+	'ai_schema_version',
+	'original_filename',
+	'file_hash',
+	'source_pdf',
+	'pdf',
+	'annotations_file',
+]);
+
 export class PaperLibraryRepository {
 	constructor(
 		private readonly app: App,
@@ -240,6 +252,16 @@ export class PaperLibraryRepository {
 				},
 				title,
 			),
+			properties: paperPropertiesMap({
+				title,
+				authors: [],
+				status: 'unread',
+				ai_status: 'not_started',
+				ai_model: '',
+				ai_error: '',
+				created_at: createdAt,
+				updated_at: createdAt,
+			}),
 			id,
 			status: 'unread',
 			originalFilename: file.name,
@@ -291,6 +313,7 @@ export class PaperLibraryRepository {
 
 		return {
 			...paperPropertiesFromFrontmatter(frontmatter, title),
+			properties: paperPropertiesMap(frontmatter),
 			id,
 			status: paperStatus(frontmatter.status),
 			originalFilename,
@@ -452,6 +475,22 @@ function paperPropertiesFromFrontmatter(
 		aiUpdatedAt: stringValue(frontmatter.ai_updated_at) || null,
 		aiError: stringValue(frontmatter.ai_error),
 	};
+}
+
+function paperPropertiesMap(frontmatter: Frontmatter): Record<string, unknown> {
+	const properties: Record<string, unknown> = {};
+
+	for (const [key, value] of Object.entries(frontmatter)) {
+		if (INTERNAL_FRONTMATTER_KEYS.has(key)) {
+			continue;
+		}
+		if (value === null || value === undefined) {
+			continue;
+		}
+		properties[key] = value;
+	}
+
+	return properties;
 }
 
 function writeFrontmatterValue(

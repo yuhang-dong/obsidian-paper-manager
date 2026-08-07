@@ -12,9 +12,11 @@ export class PaperLibraryView extends ItemView {
 	private reactRoot: Root | null = null;
 	private readonly repository: PaperLibraryRepository;
 	private readonly getBillingKey: () => string;
+	private readonly plugin: PaperManagerPlugin;
 
 	constructor(leaf: WorkspaceLeaf, plugin: PaperManagerPlugin) {
 		super(leaf);
+		this.plugin = plugin;
 		this.repository = new PaperLibraryRepository(
 			this.app,
 			() => plugin.settings.libraryFolder,
@@ -49,6 +51,11 @@ export class PaperLibraryView extends ItemView {
 					confirmDeletePaper={(paper) =>
 						confirmPaperDeletion(this.app, paper)
 					}
+					initialTableSettings={this.plugin.settings.libraryTable}
+					saveTableSettings={(settings) => {
+						this.plugin.settings.libraryTable = settings;
+						return this.plugin.saveSettings();
+					}}
 				/>
 			</StrictMode>,
 		);

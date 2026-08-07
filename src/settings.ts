@@ -5,16 +5,36 @@ import {
 	Setting,
 	SettingDefinitionItem,
 } from 'obsidian';
+import type { ObsidianPropertyType } from './papers/paper-property-schema';
 import PaperManagerPlugin from './main';
+
+export interface LibraryCustomColumn {
+	property: string;
+	type: ObsidianPropertyType;
+}
+
+export interface LibraryTableSettings {
+	/** Column ids hidden by the user. Absent means visible. */
+	visibility: Record<string, boolean>;
+	/** User-added columns; the column id is the frontmatter key. */
+	customColumns: LibraryCustomColumn[];
+}
+
+export const DEFAULT_LIBRARY_TABLE_SETTINGS: LibraryTableSettings = {
+	visibility: {},
+	customColumns: [],
+};
 
 export interface PaperManagerSettings {
 	libraryFolder: string;
 	aiApiKey: string;
+	libraryTable: LibraryTableSettings;
 }
 
 export const DEFAULT_SETTINGS: PaperManagerSettings = {
 	libraryFolder: 'Papers',
 	aiApiKey: '',
+	libraryTable: DEFAULT_LIBRARY_TABLE_SETTINGS,
 };
 
 export class PaperManagerSettingTab extends PluginSettingTab {

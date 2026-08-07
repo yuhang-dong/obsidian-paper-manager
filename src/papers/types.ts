@@ -17,6 +17,8 @@ export interface PaperRecord
 	pdfPath: string;
 	annotationsPath: string;
 	createdAt: string;
+	/** Raw frontmatter properties (plugin-internal keys excluded). */
+	properties: Record<string, unknown>;
 }
 
 export interface PaperImportError {
