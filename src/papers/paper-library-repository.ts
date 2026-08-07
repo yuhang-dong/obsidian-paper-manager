@@ -112,6 +112,37 @@ export class PaperLibraryRepository {
 		await this.app.workspace.getLeaf('tab').openFile(file);
 	}
 
+	async readSourcePdf(paper: PaperRecord): Promise<ArrayBuffer> {
+		const file = this.app.vault.getAbstractFileByPath(paper.sourcePdfPath);
+		if (!(file instanceof TFile)) {
+			throw new Error(`Source PDF not found: ${paper.sourcePdfPath}`);
+		}
+
+		return this.app.vault.readBinary(file);
+	}
+
+	async deletePaper(paper: PaperRecord): Promise<void> {
+		const expectedFolderPath = normalizePath(
+			`${this.libraryFolder}/${paper.id}`,
+		);
+		const indexSeparator = paper.indexPath.lastIndexOf('/');
+		const paperFolderPath = normalizePath(
+			indexSeparator >= 0
+				? paper.indexPath.slice(0, indexSeparator)
+				: paper.indexPath,
+		);
+		if (paperFolderPath !== expectedFolderPath) {
+			throw new Error('Refusing to delete a paper outside its managed UUID folder');
+		}
+
+		const paperFolder = this.app.vault.getAbstractFileByPath(paperFolderPath);
+		if (!(paperFolder instanceof TFolder)) {
+			throw new Error(`Paper folder not found: ${paperFolderPath}`);
+		}
+
+		await this.app.fileManager.trashFile(paperFolder);
+	}
+
 	async updatePaperProperties(
 		paper: PaperRecord,
 		updates: PaperPropertyUpdates,

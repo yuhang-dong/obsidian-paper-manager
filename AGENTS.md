@@ -60,6 +60,12 @@ Use the Vault API for visible Vault files, including `createBinary`,
 data inside `.obsidian/plugins/paper-manager`, because that directory belongs to
 the installed plugin and may be removed.
 
+Deleting a managed paper is a confirmed destructive action. Delete its complete
+UUID folder through `FileManager.trashFile()` so the immutable source PDF,
+index note, derived annotated PDF, and annotation state all follow the user's
+configured Obsidian deletion behavior. Do not maintain a second Paper Manager
+trash folder.
+
 ## Paper property schema
 
 `index.md` frontmatter is the single source of truth for bibliographic metadata
@@ -75,14 +81,14 @@ such as verification or favorites, not for long-form AI output.
 
 ## AI integration
 
-Use the Vercel AI SDK and AI Elements when the real analysis UI and streaming
-workflow are implemented. The Worker exposes a generic `/api/chat` route rather
-than a paper-analysis-specific endpoint. Keep one Worker base URL as a source
-constant, use it for both billing and chat, and pass the paper schema, prompts,
-messages, and optional tools through the generic chat request. Read the Paper
-Manager billing key from plugin settings. The key is stored in Obsidian's plugin
-settings data and is not encrypted; never write it into a paper note or include
-it in logs.
+Use the Vercel AI SDK for the analysis transport and source-owned AI Elements
+components for analysis progress. The Worker exposes a generic `/api/chat`
+route rather than a paper-analysis-specific endpoint. Keep one Worker base URL
+as a source constant, use it for both billing and chat, and pass the paper
+schema, prompts, messages, and tools through the generic chat request. Read the
+Paper Manager billing key from plugin settings. The key is stored in Obsidian's
+plugin settings data and is not encrypted; never write it into a paper note or
+include it in logs.
 
 The paid product type is `paper_manager`, and its allowed chat model is
 `openai/gpt-5.6-luna`. The Worker remains a generic authenticated model proxy;
@@ -99,6 +105,13 @@ header. Keep usage tokens in memory only and never persist or log them.
 AI jobs update `ai_status`, `ai_schema_version`, `ai_model`, `ai_updated_at`, and
 `ai_error` in `index.md`. Validate the structured response before applying all
 result fields through the repository's single frontmatter update operation.
+Analyze the immutable `source.pdf`, send it as an `application/pdf` file part,
+and force one `savePaperAnalysis` client-tool call. Validate the tool input with
+Zod before writing any extracted fields. Use Obsidian's `requestUrl` through a
+Fetch-compatible adapter so calls do not depend on renderer CORS permissions;
+the adapter buffers the HTTP response before the AI SDK decodes its UI-message
+stream, so this workflow should be presented as staged progress rather than
+token-by-token streaming.
 
 ## Packaging constraint
 

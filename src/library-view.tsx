@@ -3,6 +3,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { ItemView, WorkspaceLeaf } from 'obsidian';
 import { PaperLibraryPage } from '@/components/paper-library-page';
 import { PaperLibraryRepository } from '@/papers/paper-library-repository';
+import { confirmPaperDeletion } from '@/papers/confirm-paper-deletion';
 import type PaperManagerPlugin from '@/main';
 
 export const PAPER_LIBRARY_VIEW_TYPE = 'paper-manager-library';
@@ -10,6 +11,7 @@ export const PAPER_LIBRARY_VIEW_TYPE = 'paper-manager-library';
 export class PaperLibraryView extends ItemView {
 	private reactRoot: Root | null = null;
 	private readonly repository: PaperLibraryRepository;
+	private readonly getBillingKey: () => string;
 
 	constructor(leaf: WorkspaceLeaf, plugin: PaperManagerPlugin) {
 		super(leaf);
@@ -17,6 +19,7 @@ export class PaperLibraryView extends ItemView {
 			this.app,
 			() => plugin.settings.libraryFolder,
 		);
+		this.getBillingKey = () => plugin.settings.aiApiKey;
 	}
 
 	getViewType(): string {
@@ -40,7 +43,13 @@ export class PaperLibraryView extends ItemView {
 		this.reactRoot = createRoot(reactContainer);
 		this.reactRoot.render(
 			<StrictMode>
-				<PaperLibraryPage repository={this.repository} />
+				<PaperLibraryPage
+					repository={this.repository}
+					getBillingKey={this.getBillingKey}
+					confirmDeletePaper={(paper) =>
+						confirmPaperDeletion(this.app, paper)
+					}
+				/>
 			</StrictMode>,
 		);
 	}

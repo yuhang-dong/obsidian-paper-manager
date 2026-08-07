@@ -11,6 +11,8 @@ import {
 	LoaderCircle,
 	Search,
 	SlidersHorizontal,
+	Sparkles,
+	Trash2,
 	Upload,
 } from 'lucide-react';
 import { Notice } from 'obsidian';
@@ -24,6 +26,12 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
+	Task,
+	TaskContent,
+	TaskItem,
+	TaskTrigger,
+} from '@/components/ai-elements/task';
+import {
 	Table,
 	TableBody,
 	TableCell,
@@ -33,9 +41,21 @@ import {
 } from '@/components/ui/table';
 import type { PaperLibraryRepository } from '@/papers/paper-library-repository';
 import type { PaperImportResult, PaperRecord } from '@/papers/types';
+import {
+	analyzePaper,
+	type PaperAnalysisStage,
+} from '@/ai/paper-analysis';
 
 interface PaperLibraryPageProps {
 	repository: PaperLibraryRepository;
+	getBillingKey: () => string;
+	confirmDeletePaper: (paper: PaperRecord) => Promise<boolean>;
+}
+
+interface ActivePaperAnalysis {
+	paperId: string;
+	title: string;
+	stage: PaperAnalysisStage;
 }
 
 const paperTableFeatures = tableFeatures({ rowSelectionFeature });
@@ -44,12 +64,19 @@ const paperColumnHelper = createColumnHelper<
 	PaperRecord
 >();
 
-export function PaperLibraryPage({ repository }: PaperLibraryPageProps) {
+export function PaperLibraryPage({
+	repository,
+	getBillingKey,
+	confirmDeletePaper,
+}: PaperLibraryPageProps) {
 	const fileInputRef = useRef<HTMLInputElement>(null);
 	const [papers, setPapers] = useState<PaperRecord[]>([]);
 	const [query, setQuery] = useState('');
 	const [isLoading, setIsLoading] = useState(true);
 	const [isImporting, setIsImporting] = useState(false);
+	const [activeAnalysis, setActiveAnalysis] =
+		useState<ActivePaperAnalysis | null>(null);
+	const [deletingPaperId, setDeletingPaperId] = useState<string | null>(null);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -161,8 +188,76 @@ export function PaperLibraryPage({ repository }: PaperLibraryPageProps) {
 						<Badge variant="secondary">{row.original.status}</Badge>
 					),
 				}),
+				paperColumnHelper.display({
+					id: 'aiAnalysis',
+					header: 'AI analysis',
+					cell: ({ row }) => {
+						const paper = row.original;
+						const isActive = activeAnalysis?.paperId === paper.id;
+						const isAnotherActive =
+							activeAnalysis !== null && !isActive;
+						const isComplete = paper.aiStatus === 'completed';
+
+						return (
+							<Button
+								variant={isComplete ? 'ghost' : 'outline'}
+								size="sm"
+								disabled={isAnotherActive || isActive}
+								title={
+									paper.aiStatus === 'failed' && paper.aiError
+										? paper.aiError
+										: isComplete
+											? 'Analyze again (uses credits)'
+											: 'Analyze this PDF (uses credits)'
+								}
+								onClick={() => void handleAnalyzePaper(paper)}
+							>
+								{isActive ? (
+									<LoaderCircle className="animate-spin" />
+								) : (
+									<Sparkles />
+								)}
+								{isActive
+									? analysisStageLabel(activeAnalysis.stage)
+									: isComplete
+										? 'Reanalyze'
+										: paper.aiStatus === 'failed'
+											? 'Retry'
+											: 'Analyze'}
+							</Button>
+						);
+					},
+				}),
+				paperColumnHelper.display({
+					id: 'actions',
+					header: 'Actions',
+					cell: ({ row }) => {
+						const paper = row.original;
+						const isDeleting = deletingPaperId === paper.id;
+
+						return (
+							<Button
+								variant="ghost"
+								size="icon"
+								className="text-muted-foreground hover:text-destructive"
+								disabled={
+									deletingPaperId !== null || activeAnalysis !== null
+								}
+								title="Delete paper"
+								aria-label={`Delete ${paper.title}`}
+								onClick={() => void handleDeletePaper(paper)}
+							>
+								{isDeleting ? (
+									<LoaderCircle className="animate-spin" />
+								) : (
+									<Trash2 />
+								)}
+							</Button>
+						);
+					},
+				}),
 			]),
-		[repository],
+		[activeAnalysis, confirmDeletePaper, deletingPaperId, repository],
 	);
 
 	const table = useTable(
@@ -204,6 +299,74 @@ export function PaperLibraryPage({ repository }: PaperLibraryPageProps) {
 			new Notice(`Could not import papers: ${errorMessage(error)}`);
 		} finally {
 			setIsImporting(false);
+		}
+	}
+
+	async function handleAnalyzePaper(paper: PaperRecord): Promise<void> {
+		if (activeAnalysis) {
+			return;
+		}
+
+		const billingKey = getBillingKey().trim();
+		if (!billingKey) {
+			new Notice('Add your paper manager billing key in plugin settings first.');
+			return;
+		}
+
+		setActiveAnalysis({
+			paperId: paper.id,
+			title: paper.title,
+			stage: 'reading_pdf',
+		});
+
+		try {
+			const result = await analyzePaper({
+				repository,
+				paper,
+				billingKey,
+				onProgress: (stage) => {
+					setActiveAnalysis((current) =>
+						current?.paperId === paper.id ? { ...current, stage } : current,
+					);
+				},
+			});
+			setPapers((current) => mergePapers(current, [result.paper]));
+			new Notice(
+				`Analysis saved · ${result.usage.creditsCharged} credit(s) · ${result.usage.remainingCredits} remaining`,
+			);
+		} catch (error) {
+			new Notice(`Could not analyze paper: ${errorMessage(error)}`);
+			try {
+				setPapers(await repository.listPapers());
+			} catch (refreshError) {
+				console.error('Could not refresh papers after analysis failure', refreshError);
+			}
+		} finally {
+			setActiveAnalysis(null);
+		}
+	}
+
+	async function handleDeletePaper(paper: PaperRecord): Promise<void> {
+		if (deletingPaperId || activeAnalysis) {
+			return;
+		}
+
+		const confirmed = await confirmDeletePaper(paper);
+		if (!confirmed) {
+			return;
+		}
+
+		setDeletingPaperId(paper.id);
+		try {
+			await repository.deletePaper(paper);
+			setPapers((current) =>
+				current.filter((candidate) => candidate.id !== paper.id),
+			);
+			new Notice('Paper deleted');
+		} catch (error) {
+			new Notice(`Could not delete paper: ${errorMessage(error)}`);
+		} finally {
+			setDeletingPaperId(null);
 		}
 	}
 
@@ -254,6 +417,9 @@ export function PaperLibraryPage({ repository }: PaperLibraryPageProps) {
 							{isImporting ? 'Importing…' : 'Import papers'}
 						</Button>
 					</div>
+					{activeAnalysis ? (
+						<PaperAnalysisProgress analysis={activeAnalysis} />
+					) : null}
 					<Table>
 						<TableHeader>
 							{table.getHeaderGroups().map((headerGroup) => (
@@ -320,8 +486,74 @@ function columnClassName(columnId: string): string | undefined {
 	if (columnId === 'status') {
 		return 'w-28';
 	}
+	if (columnId === 'aiAnalysis') {
+		return 'w-36';
+	}
+	if (columnId === 'actions') {
+		return 'w-20';
+	}
 
 	return undefined;
+}
+
+const PAPER_ANALYSIS_STAGES: ReadonlyArray<{
+	id: PaperAnalysisStage;
+	label: string;
+}> = [
+	{ id: 'reading_pdf', label: 'Read source PDF' },
+	{ id: 'reserving_credits', label: 'Reserve usage credits' },
+	{ id: 'analyzing', label: 'Extract and analyze paper' },
+	{ id: 'saving', label: 'Save Markdown properties' },
+];
+
+function PaperAnalysisProgress({
+	analysis,
+}: {
+	analysis: ActivePaperAnalysis;
+}) {
+	const activeIndex = PAPER_ANALYSIS_STAGES.findIndex(
+		(stage) => stage.id === analysis.stage,
+	);
+
+	return (
+		<div className="border-b border-border bg-muted/40 px-4 py-3">
+			<Task open>
+				<TaskTrigger>
+					<Sparkles className="size-4 text-primary" />
+					<span className="truncate">Analyzing {analysis.title}</span>
+				</TaskTrigger>
+				<TaskContent>
+					{PAPER_ANALYSIS_STAGES.map((stage, index) => (
+						<TaskItem
+							key={stage.id}
+							status={
+								index < activeIndex
+									? 'complete'
+									: index === activeIndex
+										? 'active'
+										: 'pending'
+							}
+						>
+							{stage.label}
+						</TaskItem>
+					))}
+				</TaskContent>
+			</Task>
+		</div>
+	);
+}
+
+function analysisStageLabel(stage: PaperAnalysisStage): string {
+	if (stage === 'reading_pdf') {
+		return 'Reading…';
+	}
+	if (stage === 'reserving_credits') {
+		return 'Starting…';
+	}
+	if (stage === 'saving') {
+		return 'Saving…';
+	}
+	return 'Analyzing…';
 }
 
 function LoadingRow({ columnCount }: { columnCount: number }) {
