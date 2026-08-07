@@ -14,6 +14,12 @@ import {
 	Upload,
 } from 'lucide-react';
 import { Notice } from 'obsidian';
+import {
+	createColumnHelper,
+	rowSelectionFeature,
+	tableFeatures,
+	useTable,
+} from '@tanstack/react-table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -32,10 +38,15 @@ interface PaperLibraryPageProps {
 	repository: PaperLibraryRepository;
 }
 
+const paperTableFeatures = tableFeatures({ rowSelectionFeature });
+const paperColumnHelper = createColumnHelper<
+	typeof paperTableFeatures,
+	PaperRecord
+>();
+
 export function PaperLibraryPage({ repository }: PaperLibraryPageProps) {
 	const fileInputRef = useRef<HTMLInputElement>(null);
 	const [papers, setPapers] = useState<PaperRecord[]>([]);
-	const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 	const [query, setQuery] = useState('');
 	const [isLoading, setIsLoading] = useState(true);
 	const [isImporting, setIsImporting] = useState(false);
@@ -80,9 +91,91 @@ export function PaperLibraryPage({ repository }: PaperLibraryPageProps) {
 		});
 	}, [papers, query]);
 
-	const allVisibleSelected =
-		filteredPapers.length > 0 &&
-		filteredPapers.every((paper) => selectedIds.has(paper.id));
+	const columns = useMemo(
+		() =>
+			paperColumnHelper.columns([
+				paperColumnHelper.display({
+					id: 'select',
+					header: ({ table }) => (
+						<input
+							type="checkbox"
+							aria-label="Select all papers"
+							className="size-4 accent-[var(--interactive-accent)]"
+							checked={table.getIsAllRowsSelected()}
+							disabled={table.getRowModel().rows.length === 0}
+							onChange={table.getToggleAllRowsSelectedHandler()}
+						/>
+					),
+					cell: ({ row }) => (
+						<input
+							type="checkbox"
+							aria-label={`Select ${row.original.title}`}
+							className="size-4 accent-[var(--interactive-accent)]"
+							checked={row.getIsSelected()}
+							onChange={row.getToggleSelectedHandler()}
+						/>
+					),
+				}),
+				paperColumnHelper.accessor('title', {
+					header: 'Title',
+					cell: ({ row }) => (
+						<button
+							type="button"
+							className="max-w-xl cursor-pointer truncate text-left font-medium text-foreground hover:text-[var(--text-accent)] hover:underline"
+							title={row.original.originalFilename}
+							onClick={() => {
+								void repository
+									.openIndex(row.original)
+									.catch((error: unknown) => {
+										new Notice(
+											`Could not open paper: ${errorMessage(error)}`,
+										);
+									});
+							}}
+						>
+							{row.original.title}
+						</button>
+					),
+				}),
+				paperColumnHelper.accessor('authors', {
+					header: 'Authors',
+					cell: ({ row }) => (
+						<span className="text-muted-foreground">
+							{row.original.authors.length > 0
+								? row.original.authors.join(', ')
+								: '—'}
+						</span>
+					),
+				}),
+				paperColumnHelper.accessor('year', {
+					header: 'Year',
+					cell: ({ row }) => (
+						<span className="text-muted-foreground">
+							{row.original.year ?? '—'}
+						</span>
+					),
+				}),
+				paperColumnHelper.accessor('status', {
+					header: 'Status',
+					cell: ({ row }) => (
+						<Badge variant="secondary">{row.original.status}</Badge>
+					),
+				}),
+			]),
+		[repository],
+	);
+
+	const table = useTable(
+		{
+			features: paperTableFeatures,
+			columns,
+			data: filteredPapers,
+			getRowId: (paper) => paper.id,
+		},
+		(state) => ({ rowSelection: state.rowSelection }),
+	);
+	const visibleRows = table.getRowModel().rows;
+	const selectedCount = Object.keys(table.state.rowSelection).length;
 
 	function chooseFiles(): void {
 		if (fileInputRef.current) {
@@ -112,32 +205,6 @@ export function PaperLibraryPage({ repository }: PaperLibraryPageProps) {
 		} finally {
 			setIsImporting(false);
 		}
-	}
-
-	function togglePaper(id: string): void {
-		setSelectedIds((current) => {
-			const next = new Set(current);
-			if (next.has(id)) {
-				next.delete(id);
-			} else {
-				next.add(id);
-			}
-			return next;
-		});
-	}
-
-	function toggleAllVisible(): void {
-		setSelectedIds((current) => {
-			const next = new Set(current);
-			for (const paper of filteredPapers) {
-				if (allVisibleSelected) {
-					next.delete(paper.id);
-				} else {
-					next.add(paper.id);
-				}
-			}
-			return next;
-		});
 	}
 
 	return (
@@ -189,41 +256,44 @@ export function PaperLibraryPage({ repository }: PaperLibraryPageProps) {
 					</div>
 					<Table>
 						<TableHeader>
-							<TableRow className="hover:bg-transparent">
-								<TableHead className="w-10">
-									<input
-										type="checkbox"
-										aria-label="Select all papers"
-										className="size-4 accent-[var(--interactive-accent)]"
-										checked={allVisibleSelected}
-										disabled={filteredPapers.length === 0}
-										onChange={toggleAllVisible}
-									/>
-								</TableHead>
-								<TableHead>Title</TableHead>
-								<TableHead>Authors</TableHead>
-								<TableHead className="w-24">Year</TableHead>
-								<TableHead className="w-28">Status</TableHead>
-							</TableRow>
+							{table.getHeaderGroups().map((headerGroup) => (
+								<TableRow key={headerGroup.id} className="hover:bg-transparent">
+									{headerGroup.headers.map((header) => (
+										<TableHead
+											key={header.id}
+											className={columnClassName(header.column.id)}
+										>
+											{header.isPlaceholder ? null : (
+												<table.FlexRender header={header} />
+											)}
+										</TableHead>
+									))}
+								</TableRow>
+							))}
 						</TableHeader>
 						<TableBody>
 							{isLoading ? (
-								<LoadingRow />
-							) : filteredPapers.length === 0 ? (
-								<EmptyRow hasPapers={papers.length > 0} />
+								<LoadingRow columnCount={columns.length} />
+							) : visibleRows.length === 0 ? (
+								<EmptyRow
+									columnCount={columns.length}
+									hasPapers={papers.length > 0}
+								/>
 							) : (
-								filteredPapers.map((paper) => (
-									<PaperRow
-										key={paper.id}
-										paper={paper}
-										selected={selectedIds.has(paper.id)}
-										onToggle={() => togglePaper(paper.id)}
-										onOpen={() => {
-											void repository.openIndex(paper).catch((error: unknown) => {
-												new Notice(`Could not open paper: ${errorMessage(error)}`);
-											});
-										}}
-									/>
+								visibleRows.map((row) => (
+									<TableRow
+										key={row.id}
+										data-state={row.getIsSelected() ? 'selected' : undefined}
+									>
+										{row.getAllCells().map((cell) => (
+											<TableCell
+												key={cell.id}
+												className={columnClassName(cell.column.id)}
+											>
+												<table.FlexRender cell={cell} />
+											</TableCell>
+										))}
+									</TableRow>
 								))
 							)}
 						</TableBody>
@@ -232,7 +302,7 @@ export function PaperLibraryPage({ repository }: PaperLibraryPageProps) {
 						{filteredPapers.length === papers.length
 							? `${papers.length} ${papers.length === 1 ? 'paper' : 'papers'}`
 							: `${filteredPapers.length} of ${papers.length} papers`}
-						{selectedIds.size > 0 ? ` · ${selectedIds.size} selected` : ''}
+						{selectedCount > 0 ? ` · ${selectedCount} selected` : ''}
 					</footer>
 				</section>
 			</main>
@@ -240,63 +310,43 @@ export function PaperLibraryPage({ repository }: PaperLibraryPageProps) {
 	);
 }
 
-function PaperRow({
-	paper,
-	selected,
-	onToggle,
-	onOpen,
-}: {
-	paper: PaperRecord;
-	selected: boolean;
-	onToggle: () => void;
-	onOpen: () => void;
-}) {
-	return (
-		<TableRow>
-			<TableCell>
-				<input
-					type="checkbox"
-					aria-label={`Select ${paper.title}`}
-					className="size-4 accent-[var(--interactive-accent)]"
-					checked={selected}
-					onChange={onToggle}
-				/>
-			</TableCell>
-			<TableCell>
-				<button
-					type="button"
-					className="max-w-xl cursor-pointer truncate text-left font-medium text-foreground hover:text-[var(--text-accent)] hover:underline"
-					title={paper.originalFilename}
-					onClick={onOpen}
-				>
-					{paper.title}
-				</button>
-			</TableCell>
-			<TableCell className="text-muted-foreground">
-				{paper.authors.length > 0 ? paper.authors.join(', ') : '—'}
-			</TableCell>
-			<TableCell className="text-muted-foreground">{paper.year ?? '—'}</TableCell>
-			<TableCell>
-				<Badge variant="secondary">{paper.status}</Badge>
-			</TableCell>
-		</TableRow>
-	);
+function columnClassName(columnId: string): string | undefined {
+	if (columnId === 'select') {
+		return 'w-10';
+	}
+	if (columnId === 'year') {
+		return 'w-24';
+	}
+	if (columnId === 'status') {
+		return 'w-28';
+	}
+
+	return undefined;
 }
 
-function LoadingRow() {
+function LoadingRow({ columnCount }: { columnCount: number }) {
 	return (
 		<TableRow className="hover:bg-transparent">
-			<TableCell colSpan={5} className="h-72 text-center text-muted-foreground">
+			<TableCell
+				colSpan={columnCount}
+				className="h-72 text-center text-muted-foreground"
+			>
 				<LoaderCircle className="mx-auto size-6 animate-spin" />
 			</TableCell>
 		</TableRow>
 	);
 }
 
-function EmptyRow({ hasPapers }: { hasPapers: boolean }) {
+function EmptyRow({
+	columnCount,
+	hasPapers,
+}: {
+	columnCount: number;
+	hasPapers: boolean;
+}) {
 	return (
 		<TableRow className="hover:bg-transparent">
-			<TableCell colSpan={5} className="h-72 text-center">
+			<TableCell colSpan={columnCount} className="h-72 text-center">
 				<div className="mx-auto flex max-w-sm flex-col items-center gap-3 text-muted-foreground">
 					<div className="rounded-full bg-muted p-3">
 						<FileText className="size-6" />
