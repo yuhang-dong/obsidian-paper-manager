@@ -26,12 +26,6 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
-	Task,
-	TaskContent,
-	TaskItem,
-	TaskTrigger,
-} from '@/components/ai-elements/task';
-import {
 	Table,
 	TableBody,
 	TableCell,
@@ -45,6 +39,7 @@ import {
 	analyzePaper,
 	type PaperAnalysisStage,
 } from '@/ai/paper-analysis';
+import FakeProgress from 'fake-progress';
 
 interface PaperLibraryPageProps {
 	repository: PaperLibraryRepository;
@@ -56,6 +51,7 @@ interface ActivePaperAnalysis {
 	paperId: string;
 	title: string;
 	stage: PaperAnalysisStage;
+	progress: number;
 }
 
 const paperTableFeatures = tableFeatures({ rowSelectionFeature });
@@ -212,18 +208,31 @@ export function PaperLibraryPage({
 								}
 								onClick={() => void handleAnalyzePaper(paper)}
 							>
-								{isActive ? (
-									<LoaderCircle className="animate-spin" />
-								) : (
-									<Sparkles />
-								)}
 								{isActive
-									? analysisStageLabel(activeAnalysis.stage)
-									: isComplete
-										? 'Reanalyze'
-										: paper.aiStatus === 'failed'
-											? 'Retry'
-											: 'Analyze'}
+									? (
+										<span className="flex flex-col items-center gap-1">
+											<span className="flex items-center gap-1.5">
+												<LoaderCircle className="animate-spin" />
+												{Math.round(activeAnalysis.progress)}%
+											</span>
+											<span className="h-1 w-16 overflow-hidden rounded-full bg-muted">
+												<span
+													className="block h-full rounded-full bg-primary transition-[width] duration-500 ease-linear"
+													style={{ width: `${activeAnalysis.progress}%` }}
+												/>
+											</span>
+										</span>
+									)
+									: (
+										<>
+											<Sparkles />
+											{isComplete
+												? 'Reanalyze'
+												: paper.aiStatus === 'failed'
+													? 'Retry'
+													: 'Analyze'}
+										</>
+									)}
 							</Button>
 						);
 					},
@@ -317,7 +326,30 @@ export function PaperLibraryPage({
 			paperId: paper.id,
 			title: paper.title,
 			stage: 'reading_pdf',
+			progress: 0,
 		});
+
+		// 36s time constant: the exponential curve reaches ~63% at 36s,
+		// ~95% at ~108s and ~99% at 3 minutes, then holds at 99%.
+		const fakeProgress = new FakeProgress({
+			timeConstant: 36_000,
+			autoStart: true,
+		});
+		const progressTimer = window.setInterval(() => {
+			setActiveAnalysis((current) => {
+				if (current?.paperId !== paper.id) {
+					return current;
+				}
+
+				return {
+					...current,
+					progress: Math.max(
+						current.progress,
+						Math.min(99, fakeProgress.progress * 100),
+					),
+				};
+			});
+		}, 500);
 
 		try {
 			const result = await analyzePaper({
@@ -331,6 +363,12 @@ export function PaperLibraryPage({
 				},
 			});
 			setPapers((current) => mergePapers(current, [result.paper]));
+			fakeProgress.end();
+			setActiveAnalysis((current) =>
+				current?.paperId === paper.id ? { ...current, progress: 100 } : current,
+			);
+			// Hold the 100% state briefly so completion is visible before resetting.
+			await new Promise((resolve) => window.setTimeout(resolve, 800));
 			new Notice(
 				`Analysis saved · ${result.usage.creditsCharged} credit(s) · ${result.usage.remainingCredits} remaining`,
 			);
@@ -342,6 +380,8 @@ export function PaperLibraryPage({
 				console.error('Could not refresh papers after analysis failure', refreshError);
 			}
 		} finally {
+			fakeProgress.stop();
+			window.clearInterval(progressTimer);
 			setActiveAnalysis(null);
 		}
 	}
@@ -417,9 +457,6 @@ export function PaperLibraryPage({
 							{isImporting ? 'Importing…' : 'Import papers'}
 						</Button>
 					</div>
-					{activeAnalysis ? (
-						<PaperAnalysisProgress analysis={activeAnalysis} />
-					) : null}
 					<Table>
 						<TableHeader>
 							{table.getHeaderGroups().map((headerGroup) => (
@@ -494,66 +531,6 @@ function columnClassName(columnId: string): string | undefined {
 	}
 
 	return undefined;
-}
-
-const PAPER_ANALYSIS_STAGES: ReadonlyArray<{
-	id: PaperAnalysisStage;
-	label: string;
-}> = [
-	{ id: 'reading_pdf', label: 'Read source PDF' },
-	{ id: 'reserving_credits', label: 'Reserve usage credits' },
-	{ id: 'analyzing', label: 'Extract and analyze paper' },
-	{ id: 'saving', label: 'Save Markdown properties' },
-];
-
-function PaperAnalysisProgress({
-	analysis,
-}: {
-	analysis: ActivePaperAnalysis;
-}) {
-	const activeIndex = PAPER_ANALYSIS_STAGES.findIndex(
-		(stage) => stage.id === analysis.stage,
-	);
-
-	return (
-		<div className="border-b border-border bg-muted/40 px-4 py-3">
-			<Task open>
-				<TaskTrigger>
-					<Sparkles className="size-4 text-primary" />
-					<span className="truncate">Analyzing {analysis.title}</span>
-				</TaskTrigger>
-				<TaskContent>
-					{PAPER_ANALYSIS_STAGES.map((stage, index) => (
-						<TaskItem
-							key={stage.id}
-							status={
-								index < activeIndex
-									? 'complete'
-									: index === activeIndex
-										? 'active'
-										: 'pending'
-							}
-						>
-							{stage.label}
-						</TaskItem>
-					))}
-				</TaskContent>
-			</Task>
-		</div>
-	);
-}
-
-function analysisStageLabel(stage: PaperAnalysisStage): string {
-	if (stage === 'reading_pdf') {
-		return 'Reading…';
-	}
-	if (stage === 'reserving_credits') {
-		return 'Starting…';
-	}
-	if (stage === 'saving') {
-		return 'Saving…';
-	}
-	return 'Analyzing…';
 }
 
 function LoadingRow({ columnCount }: { columnCount: number }) {
