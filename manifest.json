@@ -2,7 +2,7 @@
 	"id": "paper-manager",
 	"name": "Paper Manager",
 	"version": "0.1.0",
-	"minAppVersion": "1.7.2",
+	"minAppVersion": "1.8.7",
 	"description": "Manage, read, annotate, and synthesize academic papers in your vault.",
 	"author": "Paper Manager Team",
 	"isDesktopOnly": false

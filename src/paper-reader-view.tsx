@@ -1,13 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import {
-	ItemView,
-	Notice,
-	type ViewStateResult,
-	WorkspaceLeaf,
-} from 'obsidian';
+import { ItemView, type ViewStateResult, WorkspaceLeaf } from 'obsidian';
 import { PaperReaderPage } from '@/components/paper-reader-page';
-import { PaperReaderStorage } from '@/papers/paper-reader-storage';
 
 export const PAPER_READER_VIEW_TYPE = 'paper-manager-reader';
 
@@ -84,24 +78,9 @@ export class PaperReaderView extends ItemView {
 
 		this.reactRoot.render(
 			<StrictMode>
-				<PaperReaderPage
-					app={this.app}
-					pdfPath={this.pdfPath}
-					onBack={() => void this.openIndexNote()}
-				/>
+				<PaperReaderPage app={this.app} pdfPath={this.pdfPath} />
 			</StrictMode>,
 		);
-	}
-
-	private async openIndexNote(): Promise<void> {
-		const storage = new PaperReaderStorage(this.app, this.pdfPath);
-		const indexFile = storage.getIndexFile();
-		if (!indexFile) {
-			new Notice('找不到这篇论文的 index.md');
-			return;
-		}
-
-		await this.leaf.openFile(indexFile);
 	}
 }
 

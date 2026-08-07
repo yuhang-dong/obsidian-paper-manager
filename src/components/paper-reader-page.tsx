@@ -1,17 +1,10 @@
 import {
-	useCallback,
 	useEffect,
 	useMemo,
 	useRef,
 	useState,
 } from 'react';
-import {
-	AlertCircle,
-	ArrowLeft,
-	Check,
-	LoaderCircle,
-	Save,
-} from 'lucide-react';
+import { AlertCircle, LoaderCircle } from 'lucide-react';
 import {
 	PDFViewer,
 	type PDFViewerRef,
@@ -26,9 +19,7 @@ import {
 import { DocumentManagerPlugin } from '@embedpdf/plugin-document-manager';
 import { ExportPlugin } from '@embedpdf/plugin-export';
 import pdfiumWasmUrl from '@embedpdf/pdfium/pdfium.wasm';
-import { App, Notice, TFile } from 'obsidian';
-import { Button } from '@/components/ui/button';
-import { ZH_CN_LOCALE } from '@/embedpdf/zh-cn';
+import { App, getLanguage, Notice, TFile } from 'obsidian';
 import { PaperReaderStorage } from '@/papers/paper-reader-storage';
 
 const HIDDEN_VIEWER_CATEGORIES = [
@@ -49,7 +40,6 @@ const HIDDEN_VIEWER_CATEGORIES = [
 interface PaperReaderPageProps {
 	app: App;
 	pdfPath: string;
-	onBack: () => void;
 }
 
 interface PdfSourceState {
@@ -60,7 +50,6 @@ interface PdfSourceState {
 export function PaperReaderPage({
 	app,
 	pdfPath,
-	onBack,
 }: PaperReaderPageProps) {
 	const viewerRef = useRef<PDFViewerRef>(null);
 	const storage = useMemo(
@@ -72,9 +61,6 @@ export function PaperReaderPage({
 		error: null,
 	});
 	const [registry, setRegistry] = useState<PluginRegistry | null>(null);
-	const [isSaving, setIsSaving] = useState(false);
-	const [isDirty, setIsDirty] = useState(false);
-	const [hasSaved, setHasSaved] = useState(false);
 	const isManagedPaper = storage.isManagedPaper();
 
 	useEffect(() => {
@@ -117,30 +103,6 @@ export function PaperReaderPage({
 	}, []);
 
 	useEffect(() => {
-		if (!registry) {
-			return;
-		}
-
-		const annotationApi = registry
-			.getPlugin<AnnotationPlugin>(AnnotationPlugin.id)
-			?.provides();
-		if (!annotationApi) {
-			return;
-		}
-
-		return annotationApi.onAnnotationEvent((event: AnnotationEvent) => {
-			if (
-				event.type === 'create' ||
-				event.type === 'update' ||
-				event.type === 'delete'
-			) {
-				setIsDirty(true);
-				setHasSaved(false);
-			}
-		});
-	}, [registry]);
-
-	useEffect(() => {
 		if (!registry || !isManagedPaper) {
 			return;
 		}
@@ -157,6 +119,52 @@ export function PaperReaderPage({
 
 		let disposed = false;
 		let loadedDocumentId: string | null = null;
+		let saveRunning = false;
+		let saveRequested = false;
+		const initialImportIds = new Set<string>();
+
+		const flushAutoSave = async () => {
+			if (saveRunning) {
+				return;
+			}
+
+			saveRunning = true;
+			try {
+				do {
+					saveRequested = false;
+					try {
+						await savePaper(registry, storage);
+					} catch (error) {
+						if (!disposed) {
+							new Notice(`自动保存失败：${errorMessage(error)}`);
+						}
+					}
+				} while (saveRequested && !disposed);
+			} finally {
+				saveRunning = false;
+			}
+		};
+
+		const unsubscribeAnnotationEvents = annotationApi.onAnnotationEvent(
+			(event: AnnotationEvent) => {
+				if (
+					event.type === 'create' &&
+					event.committed &&
+					initialImportIds.delete(event.annotation.id)
+				) {
+					return;
+				}
+
+				if (
+					event.type !== 'loaded' &&
+					event.committed &&
+					!disposed
+				) {
+					saveRequested = true;
+					void flushAutoSave();
+				}
+			},
+		);
 
 		const importSavedAnnotations = async (documentId: string) => {
 			if (loadedDocumentId === documentId) {
@@ -179,8 +187,10 @@ export function PaperReaderPage({
 				const missingAnnotations = savedAnnotations.filter((item) => {
 					return !existingIds.has(item.annotation.id);
 				});
+				for (const item of missingAnnotations) {
+					initialImportIds.add(item.annotation.id);
+				}
 				scope.importAnnotations(missingAnnotations);
-				setIsDirty(false);
 			} catch (error) {
 				if (!disposed) {
 					new Notice(`加载标注失败：${errorMessage(error)}`);
@@ -205,27 +215,9 @@ export function PaperReaderPage({
 
 		return () => {
 			disposed = true;
+			unsubscribeAnnotationEvents();
 			unsubscribe();
 		};
-	}, [isManagedPaper, registry, storage]);
-
-	const handleSave = useCallback(async () => {
-		if (!registry || !isManagedPaper) {
-			new Notice('请先导入这篇 PDF');
-			return;
-		}
-
-		setIsSaving(true);
-		try {
-			await savePaper(registry, storage);
-			setIsDirty(false);
-			setHasSaved(true);
-			new Notice('标注和 annotated.pdf 已保存');
-		} catch (error) {
-			new Notice(`保存失败：${errorMessage(error)}`);
-		} finally {
-			setIsSaving(false);
-		}
 	}, [isManagedPaper, registry, storage]);
 
 	if (source.error) {
@@ -243,84 +235,45 @@ export function PaperReaderPage({
 	}
 
 	return (
-		<div className="flex h-full min-h-0 flex-col bg-background text-foreground">
-			<header className="flex h-11 shrink-0 items-center justify-between gap-3 border-b border-border bg-background px-2">
-				<div className="flex min-w-0 items-center gap-2">
-					<Button variant="ghost" size="sm" onClick={onBack}>
-						<ArrowLeft />
-						返回笔记
-					</Button>
-					<span className="truncate text-xs text-muted-foreground">
-						{pdfPath.split('/').pop()}
-					</span>
-				</div>
-				<div className="flex shrink-0 items-center gap-2">
-					<span className="text-xs text-muted-foreground">
-						{isDirty ? '有未保存的修改' : hasSaved ? '已保存' : ''}
-					</span>
-					<Button
-						size="sm"
-						onClick={() => void handleSave()}
-						disabled={!registry || !isManagedPaper || isSaving}
-						title={
-							isManagedPaper
-								? '保存 annotations.json 和 annotated.pdf'
-								: '请先将 PDF 导入 Paper Manager'
-						}
-					>
-						{isSaving ? (
-							<LoaderCircle className="animate-spin" />
-						) : hasSaved && !isDirty ? (
-							<Check />
-						) : (
-							<Save />
-						)}
-						{isSaving ? '保存中…' : '保存'}
-					</Button>
-				</div>
-			</header>
-
-			<div className="min-h-0 flex-1">
-				{source.url ? (
-					<PDFViewer
-						ref={viewerRef}
-						key={source.url}
-						config={{
-							src: source.url,
-							wasmUrl: pdfiumWasmUrl,
-							worker: true,
-							fontFallback: null,
-							fonts: {
-								ui: null,
-								signature: null,
-							},
-							i18n: {
-								defaultLocale: ZH_CN_LOCALE.code,
-								locales: [ZH_CN_LOCALE],
-							},
-							ui: {
-								disabledCategories: HIDDEN_VIEWER_CATEGORIES,
-							},
-							annotations: {
-								autoCommit: true,
-								annotationAuthor: 'Paper Manager',
-								selectAfterCreate: true,
-							},
-							tabBar: 'never',
-							theme: getObsidianTheme(),
-						}}
-						style={{ width: '100%', height: '100%' }}
-						onReady={setRegistry}
-					/>
-				) : (
-					<div className="flex h-full items-center justify-center text-muted-foreground">
-						<div className="flex items-center gap-2 text-sm">
-							<LoaderCircle className="size-5 animate-spin" />
-							正在加载 PDF…
-						</div>
+		<div className="h-full min-h-0 bg-background text-foreground">
+			{source.url ? (
+				<PDFViewer
+					ref={viewerRef}
+					key={source.url}
+					config={{
+						src: source.url,
+						wasmUrl: pdfiumWasmUrl,
+						worker: true,
+						fontFallback: null,
+						fonts: {
+							ui: null,
+							signature: null,
+						},
+						i18n: {
+							defaultLocale: getEmbedPdfLocale(getLanguage()),
+						},
+						ui: {
+							disabledCategories: HIDDEN_VIEWER_CATEGORIES,
+						},
+						annotations: {
+							autoCommit: true,
+							annotationAuthor: 'Paper Manager',
+							selectAfterCreate: true,
+						},
+						tabBar: 'never',
+						theme: getObsidianTheme(),
+					}}
+					style={{ width: '100%', height: '100%' }}
+					onReady={setRegistry}
+				/>
+			) : (
+				<div className="flex h-full items-center justify-center text-muted-foreground">
+					<div className="flex items-center gap-2 text-sm">
+						<LoaderCircle className="size-5 animate-spin" />
+						正在加载 PDF…
 					</div>
-				)}
-			</div>
+				</div>
+			)}
 		</div>
 	);
 }
@@ -414,6 +367,28 @@ function getObsidianTheme(): ThemeConfig {
 	return preference === 'dark'
 		? { preference, dark: overrides }
 		: { preference, light: overrides };
+}
+
+function getEmbedPdfLocale(obsidianLanguage: string): string {
+	const normalized = obsidianLanguage.replace('_', '-').toLowerCase();
+	const localeMap: Record<string, string> = {
+		en: 'en',
+		'en-us': 'en',
+		'en-gb': 'en',
+		de: 'de',
+		nl: 'nl',
+		fr: 'fr',
+		es: 'es',
+		sv: 'sv',
+		ja: 'ja',
+		zh: 'zh-CN',
+		'zh-cn': 'zh-CN',
+		'zh-tw': 'zh-TW',
+		pt: 'pt-BR',
+		'pt-br': 'pt-BR',
+	};
+
+	return localeMap[normalized] ?? localeMap[normalized.split('-')[0] ?? ''] ?? 'en';
 }
 
 function errorMessage(error: unknown): string {
