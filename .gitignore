@@ -1,0 +1,22 @@
+# Editors
+.vscode
+.idea
+*.iml
+
+# Dependencies
+node_modules
+
+# Compiled release artifact
+main.js
+
+# Source maps
+*.map
+
+# Obsidian plugin data
+data.json
+
+# Developer-specific vault deployment target
+local.config.json
+
+# macOS
+.DS_Store

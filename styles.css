@@ -1,0 +1,54 @@
+.paper-manager-library {
+	padding: var(--size-4-6);
+}
+
+.paper-manager-library__header {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: var(--size-4-4);
+	margin-bottom: var(--size-4-6);
+}
+
+.paper-manager-library__header h2 {
+	margin: 0;
+}
+
+.paper-manager-library__subtitle {
+	margin: var(--size-4-1) 0 0;
+	color: var(--text-muted);
+}
+
+.paper-manager-library__table-wrapper {
+	overflow-x: auto;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+}
+
+.paper-manager-library__table {
+	width: 100%;
+	border-collapse: collapse;
+}
+
+.paper-manager-library__table th,
+.paper-manager-library__table td {
+	padding: var(--size-4-3);
+	text-align: start;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.paper-manager-library__table th {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	font-weight: var(--font-semibold);
+}
+
+.paper-manager-library__table tbody tr:last-child td {
+	border-bottom: 0;
+}
+
+.paper-manager-library__empty {
+	padding: var(--size-4-12) var(--size-4-4);
+	text-align: center;
+	color: var(--text-muted);
+}
