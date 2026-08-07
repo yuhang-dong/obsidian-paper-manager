@@ -13,7 +13,8 @@ import type {
 } from './types';
 
 const INDEX_FILENAME = 'index.md';
-const PDF_FILENAME = 'source.pdf';
+const SOURCE_PDF_FILENAME = 'source.pdf';
+const ANNOTATED_PDF_FILENAME = 'annotated.pdf';
 const ANNOTATIONS_FILENAME = 'annotations.json';
 
 type Frontmatter = Record<string, unknown>;
@@ -112,13 +113,15 @@ export class PaperLibraryRepository {
 		const id = crypto.randomUUID();
 		const folderPath = normalizePath(`${this.libraryFolder}/${id}`);
 		const indexPath = `${folderPath}/${INDEX_FILENAME}`;
-		const pdfPath = `${folderPath}/${PDF_FILENAME}`;
+		const sourcePdfPath = `${folderPath}/${SOURCE_PDF_FILENAME}`;
+		const pdfPath = `${folderPath}/${ANNOTATED_PDF_FILENAME}`;
 		const annotationsPath = `${folderPath}/${ANNOTATIONS_FILENAME}`;
 		const createdAt = new Date().toISOString();
 		const title = titleFromFilename(file.name);
 
 		await this.ensureFolder(folderPath);
-		await this.app.vault.createBinary(pdfPath, data);
+		await this.app.vault.createBinary(sourcePdfPath, data);
+		await this.app.vault.createBinary(pdfPath, data.slice(0));
 		await this.app.vault.create(
 			annotationsPath,
 			JSON.stringify(
@@ -150,6 +153,7 @@ export class PaperLibraryRepository {
 			originalFilename: file.name,
 			fileHash,
 			indexPath,
+			sourcePdfPath,
 			pdfPath,
 			annotationsPath,
 			createdAt,
@@ -175,10 +179,19 @@ export class PaperLibraryRepository {
 
 		const title = stringValue(frontmatter.title) || parentFolder.name;
 		const originalFilename =
-			stringValue(frontmatter.original_filename) || PDF_FILENAME;
+			stringValue(frontmatter.original_filename) || SOURCE_PDF_FILENAME;
 		const createdAt =
 			stringValue(frontmatter.created_at) ||
 			new Date(file.stat.ctime).toISOString();
+
+		const sourcePdfPath = normalizePath(
+			`${folderPath}/${SOURCE_PDF_FILENAME}`,
+		);
+		const annotatedPdfPath = normalizePath(
+			`${folderPath}/${ANNOTATED_PDF_FILENAME}`,
+		);
+		const hasAnnotatedPdf =
+			this.app.vault.getAbstractFileByPath(annotatedPdfPath) instanceof TFile;
 
 		return {
 			id,
@@ -189,7 +202,8 @@ export class PaperLibraryRepository {
 			originalFilename,
 			fileHash: stringValue(frontmatter.file_hash),
 			indexPath: file.path,
-			pdfPath: normalizePath(`${folderPath}/${PDF_FILENAME}`),
+			sourcePdfPath,
+			pdfPath: hasAnnotatedPdf ? annotatedPdfPath : sourcePdfPath,
 			annotationsPath: normalizePath(
 				`${folderPath}/${ANNOTATIONS_FILENAME}`,
 			),
@@ -244,7 +258,8 @@ authors: []
 status: unread
 original_filename: ${yamlString(input.originalFilename)}
 file_hash: ${yamlString(input.fileHash)}
-pdf: ${yamlString('[[source.pdf]]')}
+source_pdf: ${yamlString('[[source.pdf]]')}
+pdf: ${yamlString('[[annotated.pdf]]')}
 annotations_file: ${yamlString(ANNOTATIONS_FILENAME)}
 created_at: ${yamlString(input.createdAt)}
 updated_at: ${yamlString(input.createdAt)}
@@ -252,7 +267,7 @@ updated_at: ${yamlString(input.createdAt)}
 
 # ${markdownHeading(input.title)}
 
-![[source.pdf]]
+![[annotated.pdf]]
 
 ## My notes
 

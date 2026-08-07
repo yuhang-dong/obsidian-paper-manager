@@ -9,6 +9,7 @@ export interface PaperRecord {
 	originalFilename: string;
 	fileHash: string;
 	indexPath: string;
+	sourcePdfPath: string;
 	pdfPath: string;
 	annotationsPath: string;
 	createdAt: string;

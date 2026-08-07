@@ -38,9 +38,50 @@
 	background: var(--background-primary);
 }
 
+.paper-manager-reader-view {
+	padding: 0;
+	overflow: hidden;
+}
+
+.paper-manager-reader-root {
+	height: 100%;
+	min-height: 0;
+}
+
 .paper-manager-root *,
 .paper-manager-root *::before,
 .paper-manager-root *::after {
 	box-sizing: border-box;
 	border-color: var(--background-modifier-border);
+}
+
+.paper-manager-inline-pdf {
+	position: relative;
+}
+
+.paper-manager-inline-pdf-edit {
+	position: absolute;
+	/* Keep the action in the document area, below Obsidian's inline PDF bar. */
+	top: calc(var(--size-4-9) + var(--size-4-3));
+	right: var(--size-2-2);
+	z-index: 20;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 30px;
+	height: 30px;
+	padding: 0;
+	color: var(--text-normal);
+	background: var(--background-primary-alt);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	box-shadow: var(--shadow-s);
+	opacity: 0.82;
+	transition: opacity 120ms ease, background-color 120ms ease;
+}
+
+.paper-manager-inline-pdf-edit:hover,
+.paper-manager-inline-pdf-edit:focus-visible {
+	background: var(--background-modifier-hover);
+	opacity: 1;
 }

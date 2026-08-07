@@ -31,6 +31,9 @@ export function createBuildOptions({ outfile, production }) {
 		],
 		format: 'cjs',
 		target: 'es2021',
+		loader: {
+			'.wasm': 'dataurl',
+		},
 		logLevel: 'info',
 		sourcemap: production ? false : 'inline',
 		treeShaking: true,
