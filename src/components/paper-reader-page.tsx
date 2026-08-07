@@ -96,6 +96,48 @@ export function PaperReaderPage({
 	const pageTextRunsCacheRef = useRef<
 		Map<string, PdfPageTextRuns>
 	>(new Map());
+	const viewerHostRef = useRef<HTMLDivElement>(null);
+
+	// The built-in comment input submits on every Enter (key === 'Enter')
+	// without checking IME composition state. Confirm-key presses from a
+	// Chinese IME therefore send the comment prematurely. Block keydown
+	// propagation while composing so only "real" Enter presses submit.
+	useEffect(() => {
+		const host = viewerHostRef.current;
+		if (!host) {
+			return;
+		}
+
+		const composingTargets = new Set<EventTarget>();
+		const onCompositionStart = (event: Event) => {
+			if (event.target) {
+				composingTargets.add(event.target);
+			}
+		};
+		const onCompositionEnd = (event: Event) => {
+			if (event.target) {
+				composingTargets.delete(event.target);
+			}
+		};
+		const onKeyDownCapture = (event: KeyboardEvent) => {
+			if (
+				event.isComposing ||
+				(event.target !== null && composingTargets.has(event.target))
+			) {
+				event.stopPropagation();
+			}
+		};
+
+		host.addEventListener('compositionstart', onCompositionStart, true);
+		host.addEventListener('compositionend', onCompositionEnd, true);
+		host.addEventListener('keydown', onKeyDownCapture, true);
+
+		return () => {
+			host.removeEventListener('compositionstart', onCompositionStart, true);
+			host.removeEventListener('compositionend', onCompositionEnd, true);
+			host.removeEventListener('keydown', onKeyDownCapture, true);
+		};
+	}, []);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -491,7 +533,10 @@ export function PaperReaderPage({
 	}
 
 	return (
-		<div className="h-full min-h-0 bg-background text-foreground">
+		<div
+			ref={viewerHostRef}
+			className="h-full min-h-0 bg-background text-foreground"
+		>
 			{source.url ? (
 				<PDFViewer
 					ref={viewerRef}
