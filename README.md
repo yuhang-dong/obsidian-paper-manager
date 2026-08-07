@@ -5,6 +5,9 @@ Paper Manager is an Obsidian plugin for organizing, reading, annotating, and syn
 This repository currently contains the MVP scaffold:
 
 - A custom paper library view.
+- React 19 view rendering with lifecycle-safe unmounting.
+- Tailwind CSS v4 utilities scoped to the plugin UI without global Preflight.
+- shadcn/ui-compatible source components and CLI configuration.
 - A table shell for future PDF metadata.
 - A configurable vault folder for imported papers.
 - Current Obsidian TypeScript, esbuild, ESLint, versioning, and release workflows.
@@ -27,6 +30,12 @@ For watch mode:
 
 ```bash
 npm run dev
+```
+
+Add more shadcn/ui components with:
+
+```bash
+npx shadcn@latest add <component>
 ```
 
 To build and deploy directly to a local development vault, copy

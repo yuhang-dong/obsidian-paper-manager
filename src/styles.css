@@ -1,0 +1,46 @@
+@layer theme, base, components, utilities;
+
+/* Tailwind utilities without Preflight, so Obsidian's global UI is untouched. */
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities) source("./");
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@theme inline {
+	--color-background: var(--background-primary);
+	--color-foreground: var(--text-normal);
+	--color-card: var(--background-primary);
+	--color-card-foreground: var(--text-normal);
+	--color-popover: var(--background-primary);
+	--color-popover-foreground: var(--text-normal);
+	--color-primary: var(--interactive-accent);
+	--color-primary-foreground: var(--text-on-accent);
+	--color-secondary: var(--background-secondary);
+	--color-secondary-foreground: var(--text-normal);
+	--color-muted: var(--background-secondary);
+	--color-muted-foreground: var(--text-muted);
+	--color-accent: var(--background-modifier-hover);
+	--color-accent-foreground: var(--text-normal);
+	--color-destructive: var(--background-modifier-error);
+	--color-destructive-foreground: var(--text-on-accent);
+	--color-border: var(--background-modifier-border);
+	--color-input: var(--background-modifier-border);
+	--color-ring: var(--interactive-accent);
+	--radius-sm: var(--radius-s);
+	--radius-md: var(--radius-m);
+	--radius-lg: var(--radius-l);
+}
+
+.paper-manager-root {
+	min-height: 100%;
+	color: var(--text-normal);
+	font-family: var(--font-interface);
+	background: var(--background-primary);
+}
+
+.paper-manager-root *,
+.paper-manager-root *::before,
+.paper-manager-root *::after {
+	box-sizing: border-box;
+	border-color: var(--background-modifier-border);
+}
