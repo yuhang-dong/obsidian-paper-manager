@@ -2,6 +2,7 @@ import {
 	type ChangeEvent,
 	type CSSProperties,
 	type ReactNode,
+	type RefObject,
 	useCallback,
 	useEffect,
 	useMemo,
@@ -34,6 +35,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ColumnsPanel } from '@/components/columns-panel';
+import { StatusMenu } from '@/components/status-menu';
 import {
 	Table,
 	TableBody,
@@ -53,6 +55,7 @@ import {
 	type ObsidianPropertyType,
 } from '@/papers/paper-property-schema';
 import type { LibraryTableSettings } from '@/settings';
+import { humanizeStatus } from '@/papers/paper-status';
 import {
 	SPECIAL_COLUMN_IDS,
 	buildLibraryColumns,
@@ -76,6 +79,11 @@ interface ActivePaperAnalysis {
 	title: string;
 	stage: PaperAnalysisStage;
 	progress: number;
+}
+
+interface StatusMenuState {
+	paper: PaperRecord;
+	anchor: HTMLButtonElement;
 }
 
 const paperTableFeatures = tableFeatures({
@@ -110,11 +118,14 @@ export function PaperLibraryPage({
 		cloneLibraryTableSettings(initialTableSettings),
 	);
 	const [columnsOpen, setColumnsOpen] = useState(false);
+	const [statusMenu, setStatusMenu] = useState<StatusMenuState | null>(null);
 	const columnsToolbarRef = useRef<HTMLDivElement>(null);
 	const activeAnalysisRef = useRef<ActivePaperAnalysis | null>(null);
 	activeAnalysisRef.current = activeAnalysis;
 	const deletingPaperIdRef = useRef<string | null>(null);
 	deletingPaperIdRef.current = deletingPaperId;
+	const statusMenuRef = useRef<StatusMenuState | null>(null);
+	statusMenuRef.current = statusMenu;
 
 	useEffect(() => {
 		let cancelled = false;
@@ -365,6 +376,28 @@ export function PaperLibraryPage({
 		[repository, confirmDeletePaper],
 	);
 
+	const handleToggleStatusMenu = useCallback(
+		(paper: PaperRecord, anchor: HTMLButtonElement): void => {
+			setStatusMenu((current) =>
+				current?.paper.id === paper.id ? null : { paper, anchor },
+			);
+		},
+		[],
+	);
+
+	const handleSelectStatus = useCallback(
+		async (paper: PaperRecord, status: string): Promise<void> => {
+			setStatusMenu(null);
+			try {
+				const updated = await repository.updatePaperStatus(paper, status);
+				setPapers((current) => mergePapers(current, [updated]));
+			} catch (error) {
+				new Notice(`Could not update status: ${errorMessage(error)}`);
+			}
+		},
+		[repository],
+	);
+
 	const columns = useMemo(
 		() =>
 			paperColumnHelper.columns(
@@ -485,7 +518,13 @@ export function PaperLibraryPage({
 							size: column.size,
 							header: () => <ColumnHeaderLabel label={column.label} />,
 							cell: ({ row }) =>
-								renderPropertyCell(column, row.original, repository),
+								renderPropertyCell(
+									column,
+									row.original,
+									repository,
+									statusMenuRef,
+									handleToggleStatusMenu,
+								),
 						},
 					);
 				}),
@@ -495,6 +534,8 @@ export function PaperLibraryPage({
 			repository,
 			handleAnalyzePaper,
 			handleDeletePaper,
+			statusMenuRef,
+			handleToggleStatusMenu,
 		],
 	);
 
@@ -590,6 +631,19 @@ export function PaperLibraryPage({
 										onShowAll={handleShowAll}
 									/>
 								) : null}
+								{statusMenu ? (
+									<StatusMenu
+										anchor={statusMenu.anchor}
+										currentStatus={statusMenu.paper.status}
+										onSelect={(status) =>
+											void handleSelectStatus(
+												statusMenu.paper,
+												status,
+											)
+										}
+										onClose={() => setStatusMenu(null)}
+									/>
+								) : null}
 							</div>
 						</div>
 						<Button
@@ -680,6 +734,11 @@ function renderPropertyCell(
 	column: LibraryColumnMeta,
 	paper: PaperRecord,
 	repository: PaperLibraryRepository,
+	statusMenuRef: RefObject<StatusMenuState | null>,
+	toggleStatusMenu: (
+		paper: PaperRecord,
+		anchor: HTMLButtonElement,
+	) => void,
 ): ReactNode {
 	if (column.id === 'title') {
 		return (
@@ -703,7 +762,19 @@ function renderPropertyCell(
 	}
 
 	if (column.id === 'status') {
-		return <Badge variant="secondary">{humanizeStatus(paper.status)}</Badge>;
+		const isOpen = statusMenuRef.current?.paper.id === paper.id;
+		return (
+			<button
+				type="button"
+				className="cursor-pointer transition-opacity hover:opacity-70"
+				title="Change reading status"
+				aria-haspopup="menu"
+				aria-expanded={isOpen}
+				onClick={(event) => toggleStatusMenu(paper, event.currentTarget)}
+			>
+				<Badge variant="secondary">{humanizeStatus(paper.status)}</Badge>
+			</button>
+		);
 	}
 
 	if (column.id === 'ai_status') {
@@ -780,13 +851,6 @@ function PropertyValueCell({
 
 function cellStyle(column: PaperColumn): CSSProperties {
 	return { width: column.getSize() };
-}
-
-function humanizeStatus(value: string): string {
-	return value
-		.replace(/_/g, ' ')
-		.replace(/\bai\b/gi, 'AI')
-		.replace(/^\w/, (character) => character.toUpperCase());
 }
 
 function paperSearchText(paper: PaperRecord): string {

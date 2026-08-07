@@ -9,7 +9,6 @@ import {
 import type {
 	PaperImportResult,
 	PaperRecord,
-	PaperStatus,
 } from './types';
 import {
 	isLiteratureType,
@@ -189,6 +188,30 @@ export class PaperLibraryRepository {
 
 			properties.ai_schema_version =
 				updates.aiSchemaVersion ?? PAPER_PROPERTY_SCHEMA_VERSION;
+			properties.updated_at = updatedAt;
+		});
+
+		const updatedPaper = await this.readPaperRecord(file, true);
+		if (!updatedPaper) {
+			throw new Error(`Could not read updated paper: ${paper.indexPath}`);
+		}
+
+		return updatedPaper;
+	}
+
+	async updatePaperStatus(
+		paper: PaperRecord,
+		status: string,
+	): Promise<PaperRecord> {
+		const file = this.app.vault.getAbstractFileByPath(paper.indexPath);
+		if (!(file instanceof TFile)) {
+			throw new Error(`Index note not found: ${paper.indexPath}`);
+		}
+
+		const updatedAt = new Date().toISOString();
+		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+			const properties = frontmatter as Frontmatter;
+			properties.status = status;
 			properties.updated_at = updatedAt;
 		});
 
@@ -513,8 +536,8 @@ function hasOwn<T extends object>(
 	return Object.prototype.hasOwnProperty.call(value, key);
 }
 
-function paperStatus(value: unknown): PaperStatus {
-	return value === 'reading' || value === 'finished' ? value : 'unread';
+function paperStatus(value: unknown): string {
+	return typeof value === 'string' && value.trim() ? value.trim() : 'unread';
 }
 
 function isRecord(value: unknown): value is Frontmatter {

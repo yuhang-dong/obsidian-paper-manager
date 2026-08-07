@@ -3,13 +3,14 @@ import type {
 	PaperAiSystemProperties,
 } from './paper-property-schema';
 
-export type PaperStatus = 'unread' | 'reading' | 'finished';
+export type { PaperStatus } from './paper-status';
 
 export interface PaperRecord
 	extends PaperAiProperties,
 		PaperAiSystemProperties {
 	id: string;
-	status: PaperStatus;
+	/** Reading status; may be a user-written value from the frontmatter. */
+	status: string;
 	originalFilename: string;
 	fileHash: string;
 	indexPath: string;
