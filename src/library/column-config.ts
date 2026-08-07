@@ -5,7 +5,6 @@ import type { LibraryTableSettings } from '@/settings';
 
 export const SPECIAL_COLUMN_IDS = {
 	select: '__select',
-	aiAnalysis: '__ai_analysis',
 	actions: '__actions',
 } as const;
 
@@ -18,6 +17,8 @@ export interface LibraryColumnMeta {
 	kind: LibraryColumnKind;
 	/** True when Paper Manager owns the render type and it cannot be changed. */
 	lockedType: boolean;
+	/** Whether the column is visible before the user customizes visibility. */
+	defaultVisible: boolean;
 	size: number;
 	/** Frontmatter key when this column is backed by a property. */
 	sourceKey?: string;
@@ -40,14 +41,39 @@ const KNOWN_SYSTEM_COLUMNS: ReadonlyArray<{
 	label: string;
 	type: ObsidianPropertyType;
 	size: number;
+	defaultVisible: boolean;
 }> = [
-	{ key: 'status', label: 'Status', type: 'text', size: 110 },
-	{ key: 'ai_status', label: 'AI status', type: 'text', size: 120 },
-	{ key: 'ai_model', label: 'AI model', type: 'text', size: 160 },
-	{ key: 'ai_error', label: 'AI error', type: 'text', size: 180 },
-	{ key: 'ai_updated_at', label: 'AI updated', type: 'datetime', size: 170 },
-	{ key: 'created_at', label: 'Created', type: 'datetime', size: 170 },
-	{ key: 'updated_at', label: 'Updated', type: 'datetime', size: 170 },
+	{ key: 'status', label: 'Status', type: 'text', size: 110, defaultVisible: true },
+	{
+		key: 'ai_status',
+		label: 'AI status',
+		type: 'text',
+		size: 120,
+		defaultVisible: false,
+	},
+	{
+		key: 'ai_model',
+		label: 'AI model',
+		type: 'text',
+		size: 160,
+		defaultVisible: false,
+	},
+	{
+		key: 'ai_error',
+		label: 'AI error',
+		type: 'text',
+		size: 180,
+		defaultVisible: false,
+	},
+	{
+		key: 'ai_updated_at',
+		label: 'AI updated',
+		type: 'datetime',
+		size: 170,
+		defaultVisible: false,
+	},
+	{ key: 'created_at', label: 'Created', type: 'datetime', size: 170, defaultVisible: true },
+	{ key: 'updated_at', label: 'Updated', type: 'datetime', size: 170, defaultVisible: true },
 ];
 
 const KNOWN_COLUMN_ORDER: readonly string[] = [
@@ -200,6 +226,7 @@ export function buildLibraryColumns(
 			type: field.propertyType,
 			kind: 'known',
 			lockedType: true,
+			defaultVisible: true,
 			size: columnSizeFor(field.propertyType, field.frontmatterKey),
 			sourceKey: field.frontmatterKey,
 		});
@@ -211,6 +238,7 @@ export function buildLibraryColumns(
 			type: system.type,
 			kind: 'known',
 			lockedType: true,
+			defaultVisible: system.defaultVisible,
 			size: system.size,
 			sourceKey: system.key,
 		});
@@ -223,6 +251,7 @@ export function buildLibraryColumns(
 			type: 'checkbox',
 			kind: 'special',
 			lockedType: true,
+			defaultVisible: true,
 			size: 40,
 		},
 	];
@@ -251,6 +280,7 @@ export function buildLibraryColumns(
 			type: inferPropertyType(catalog.get(key) ?? []),
 			kind: 'property',
 			lockedType: false,
+			defaultVisible: true,
 			size: columnSizeFor('text', key),
 			sourceKey: key,
 		});
@@ -266,29 +296,21 @@ export function buildLibraryColumns(
 			type: custom.type,
 			kind: 'custom',
 			lockedType: false,
+			defaultVisible: true,
 			size: columnSizeFor(custom.type, custom.property),
 			sourceKey: custom.property,
 		});
 	}
 
-	columns.push(
-		{
-			id: SPECIAL_COLUMN_IDS.aiAnalysis,
-			label: 'AI analysis',
-			type: 'text',
-			kind: 'special',
-			lockedType: true,
-			size: 132,
-		},
-		{
-			id: SPECIAL_COLUMN_IDS.actions,
-			label: '',
-			type: 'text',
-			kind: 'special',
-			lockedType: true,
-			size: 64,
-		},
-	);
+	columns.push({
+		id: SPECIAL_COLUMN_IDS.actions,
+		label: '',
+		type: 'text',
+		kind: 'special',
+		lockedType: true,
+		defaultVisible: true,
+		size: 150,
+	});
 
 	return columns;
 }

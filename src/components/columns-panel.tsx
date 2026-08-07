@@ -7,11 +7,12 @@ import {
 	type SyntheticEvent,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { Lock, Plus, Trash2 } from 'lucide-react';
+import { Eye, EyeOff, Lock, Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
 	OBSIDIAN_PROPERTY_TYPES,
+	SPECIAL_COLUMN_IDS,
 	type LibraryColumnMeta,
 } from '@/library/column-config';
 import type { ObsidianPropertyType } from '@/papers/paper-property-schema';
@@ -157,21 +158,45 @@ export function ColumnsPanel({
 
 			<ul className="max-h-96 overflow-y-auto px-3 py-1">
 				{columns.map((column) => {
-					const isVisible = visibility[column.id] !== false;
+					const isVisible =
+						visibility[column.id] ?? column.defaultVisible;
 					const isCustom = column.kind === 'custom';
+					const isAlwaysVisible = column.id === SPECIAL_COLUMN_IDS.select;
 
 					return (
 						<li
 							key={column.id}
 							className="flex items-center gap-1.5 border-b border-border py-1.5 last:border-0"
 						>
-							<input
-								type="checkbox"
-								aria-label={`Show ${column.label || column.id}`}
-								className="size-4 shrink-0 accent-[var(--interactive-accent)]"
-								checked={isVisible}
-								onChange={() => onToggleVisibility(column.id)}
-							/>
+							{isAlwaysVisible ? (
+								<span
+									title="Always visible"
+									aria-label="Always visible"
+									className="flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-background text-primary"
+								>
+									<Eye className="size-4" />
+								</span>
+							) : isVisible ? (
+								<button
+									type="button"
+									title="Hide column"
+									aria-label={`Hide ${column.label || column.id}`}
+									className="flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+									onClick={() => onToggleVisibility(column.id)}
+								>
+									<Eye className="size-4" />
+								</button>
+							) : (
+								<button
+									type="button"
+									title="Show column"
+									aria-label={`Show ${column.label || column.id}`}
+									className="flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+									onClick={() => onToggleVisibility(column.id)}
+								>
+									<EyeOff className="size-4" />
+								</button>
+							)}
 							<span className="flex min-w-0 flex-1 items-center gap-1">
 								<span className="truncate text-sm">
 									{column.label || column.id}

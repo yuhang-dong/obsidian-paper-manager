@@ -111,6 +111,10 @@ export function PaperLibraryPage({
 	);
 	const [columnsOpen, setColumnsOpen] = useState(false);
 	const columnsToolbarRef = useRef<HTMLDivElement>(null);
+	const activeAnalysisRef = useRef<ActivePaperAnalysis | null>(null);
+	activeAnalysisRef.current = activeAnalysis;
+	const deletingPaperIdRef = useRef<string | null>(null);
+	deletingPaperIdRef.current = deletingPaperId;
 
 	useEffect(() => {
 		let cancelled = false;
@@ -160,16 +164,18 @@ export function PaperLibraryPage({
 	);
 
 	const handleToggleVisibility = useCallback((id: string): void => {
+		if (id === SPECIAL_COLUMN_IDS.select) {
+			return;
+		}
+		const defaultVisible =
+			libraryColumns.find((column) => column.id === id)?.defaultVisible ??
+			true;
 		setTableSettings((current) => {
 			const visibility = { ...current.visibility };
-			if (current.visibility[id] === false) {
-				delete visibility[id];
-			} else {
-				visibility[id] = false;
-			}
+			visibility[id] = !(current.visibility[id] ?? defaultVisible);
 			return { ...current, visibility };
 		});
-	}, []);
+	}, [libraryColumns]);
 
 	const handleAddCustom = useCallback(
 		(property: string, type: ObsidianPropertyType): void => {
@@ -204,8 +210,13 @@ export function PaperLibraryPage({
 	}, []);
 
 	const handleShowAll = useCallback((): void => {
-		setTableSettings((current) => ({ ...current, visibility: {} }));
-	}, []);
+		setTableSettings((current) => ({
+			...current,
+			visibility: Object.fromEntries(
+				allColumnIds.map((id) => [id, true]),
+			),
+		}));
+	}, [allColumnIds]);
 
 	function chooseFiles(): void {
 		if (fileInputRef.current) {
@@ -242,7 +253,7 @@ export function PaperLibraryPage({
 
 	const handleAnalyzePaper = useCallback(
 		async (paper: PaperRecord): Promise<void> => {
-			if (activeAnalysis) {
+			if (activeAnalysisRef.current) {
 				return;
 			}
 
@@ -281,7 +292,7 @@ export function PaperLibraryPage({
 						),
 					};
 				});
-			}, 500);
+			}, 250);
 
 			try {
 				const result = await analyzePaper({
@@ -324,12 +335,12 @@ export function PaperLibraryPage({
 				setActiveAnalysis(null);
 			}
 		},
-		[activeAnalysis, repository, getBillingKey],
+		[repository, getBillingKey],
 	);
 
 	const handleDeletePaper = useCallback(
 		async (paper: PaperRecord): Promise<void> => {
-			if (deletingPaperId || activeAnalysis) {
+			if (deletingPaperIdRef.current || activeAnalysisRef.current) {
 				return;
 			}
 
@@ -351,7 +362,7 @@ export function PaperLibraryPage({
 				setDeletingPaperId(null);
 			}
 		},
-		[deletingPaperId, activeAnalysis, repository, confirmDeletePaper],
+		[repository, confirmDeletePaper],
 	);
 
 	const columns = useMemo(
@@ -384,91 +395,84 @@ export function PaperLibraryPage({
 						});
 					}
 
-					if (column.id === SPECIAL_COLUMN_IDS.aiAnalysis) {
-						return paperColumnHelper.display({
-							id: column.id,
-							size: column.size,
-							header: () => <ColumnHeaderLabel label={column.label} />,
-							cell: ({ row }) => {
-								const paper = row.original;
-								const isActive =
-									activeAnalysis?.paperId === paper.id;
-								const isAnotherActive =
-									activeAnalysis !== null && !isActive;
-								const isComplete = paper.aiStatus === 'completed';
-
-								return (
-									<Button
-										variant={isComplete ? 'ghost' : 'outline'}
-										size="sm"
-										disabled={isAnotherActive || isActive}
-										title={
-											paper.aiStatus === 'failed' && paper.aiError
-												? paper.aiError
-												: isComplete
-													? 'Analyze again (uses credits)'
-													: 'Analyze this PDF (uses credits)'
-										}
-										onClick={() => void handleAnalyzePaper(paper)}
-									>
-										{isActive ? (
-											<span className="flex flex-col items-center gap-1">
-												<span className="flex items-center gap-1.5">
-													<LoaderCircle className="animate-spin" />
-													{Math.round(activeAnalysis.progress)}%
-												</span>
-												<span className="h-1 w-16 overflow-hidden rounded-full bg-muted">
-													<span
-														className="block h-full rounded-full bg-primary transition-[width] duration-500 ease-linear"
-														style={{
-															width: `${activeAnalysis.progress}%`,
-														}}
-													/>
-												</span>
-											</span>
-										) : (
-											<>
-												<Sparkles />
-												{isComplete
-													? 'Reanalyze'
-													: paper.aiStatus === 'failed'
-														? 'Retry'
-														: 'Analyze'}
-											</>
-										)}
-									</Button>
-								);
-							},
-						});
-					}
-
 					if (column.id === SPECIAL_COLUMN_IDS.actions) {
 						return paperColumnHelper.display({
 							id: column.id,
 							size: column.size,
-							header: () => <ColumnHeaderLabel label={column.label} />,
-							cell: ({ row }) => {
-								const paper = row.original;
-								const isDeleting = deletingPaperId === paper.id;
+						header: () => <ColumnHeaderLabel label={column.label} />,
+						cell: ({ row }) => {
+							const paper = row.original;
+							const analysis = activeAnalysisRef.current;
+							const isActive =
+								analysis?.paperId === paper.id;
+							const isAnotherActive =
+								analysis !== null && !isActive;
+							const isComplete = paper.aiStatus === 'completed';
+							const isDeleting =
+								deletingPaperIdRef.current === paper.id;
 
 								return (
-									<Button
-										variant="ghost"
-										size="icon"
-										className="text-muted-foreground hover:text-destructive"
-										disabled={
-											deletingPaperId !== null || activeAnalysis !== null
-										}
-										title="Delete paper"
-										aria-label={`Delete ${paper.title}`}
-										onClick={() => void handleDeletePaper(paper)}
-									>
-										{isDeleting ? (
-											<LoaderCircle className="animate-spin" />
-										) : (
-											<Trash2 />
-										)}
-									</Button>
+									<div className="flex items-center gap-1.5">
+										<Button
+											variant={isComplete ? 'ghost' : 'outline'}
+											size="sm"
+											disabled={isAnotherActive || isActive}
+											title={
+												paper.aiStatus === 'failed' && paper.aiError
+													? paper.aiError
+													: isComplete
+														? 'Analyze again (uses credits)'
+														: 'Analyze this PDF (uses credits)'
+											}
+											onClick={() => void handleAnalyzePaper(paper)}
+										>
+											{isActive ? (
+												<span className="flex flex-col items-center gap-1">
+													<span className="flex items-center gap-1.5">
+														<LoaderCircle className="animate-spin" />
+														<span className="w-10 text-center tabular-nums">
+															{Math.round(analysis.progress)}%
+														</span>
+													</span>
+													<span className="h-1 w-16 overflow-hidden rounded-full bg-muted">
+														<span
+															className="block h-full rounded-full bg-primary transition-[width] duration-500 ease-linear"
+															style={{
+																width: `${analysis.progress}%`,
+															}}
+														/>
+													</span>
+												</span>
+											) : (
+												<>
+													<Sparkles />
+													{isComplete
+														? 'Reanalyze'
+														: paper.aiStatus === 'failed'
+															? 'Retry'
+															: 'Analyze'}
+												</>
+											)}
+										</Button>
+										<Button
+											variant="ghost"
+											size="icon"
+											className="shrink-0 text-muted-foreground hover:text-destructive"
+											disabled={
+												deletingPaperIdRef.current !== null ||
+												analysis !== null
+											}
+											title="Delete paper"
+											aria-label={`Delete ${paper.title}`}
+											onClick={() => void handleDeletePaper(paper)}
+										>
+											{isDeleting ? (
+												<LoaderCircle className="animate-spin" />
+											) : (
+												<Trash2 />
+											)}
+										</Button>
+									</div>
 								);
 							},
 						});
@@ -488,8 +492,6 @@ export function PaperLibraryPage({
 			),
 		[
 			libraryColumns,
-			activeAnalysis,
-			deletingPaperId,
 			repository,
 			handleAnalyzePaper,
 			handleDeletePaper,
@@ -503,7 +505,10 @@ export function PaperLibraryPage({
 			data: filteredPapers,
 			getRowId: (paper) => paper.id,
 			initialState: {
-				columnVisibility: tableSettings.visibility,
+				columnVisibility: resolveColumnVisibility(
+					tableSettings.visibility,
+					libraryColumns,
+				),
 			},
 		},
 		(state) => ({
@@ -518,8 +523,12 @@ export function PaperLibraryPage({
 			return;
 		}
 
-		if (!visibilityEqual(table.state.columnVisibility, tableSettings.visibility)) {
-			table.setColumnVisibility(tableSettings.visibility);
+		const nextVisibility = resolveColumnVisibility(
+			tableSettings.visibility,
+			libraryColumns,
+		);
+		if (!visibilityEqual(table.state.columnVisibility, nextVisibility)) {
+			table.setColumnVisibility(nextVisibility);
 		}
 	}, [isLoading, tableSettings.visibility, table.state.columnVisibility, table]);
 
@@ -812,6 +821,26 @@ function visibilityEqual(
 		return false;
 	}
 	return leftKeys.every((key) => left[key] === right[key]);
+}
+
+function resolveColumnVisibility(
+	overrides: Readonly<Record<string, boolean>>,
+	columns: readonly LibraryColumnMeta[],
+): Record<string, boolean> {
+	const next: Record<string, boolean> = {};
+	for (const column of columns) {
+		if (column.id === SPECIAL_COLUMN_IDS.select) {
+			continue;
+		}
+		const explicit = overrides[column.id];
+		if (explicit === true) {
+			continue;
+		}
+		if (explicit === false || !column.defaultVisible) {
+			next[column.id] = false;
+		}
+	}
+	return next;
 }
 
 function LoadingRow({ columnCount }: { columnCount: number }) {
