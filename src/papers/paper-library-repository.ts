@@ -13,17 +13,15 @@ import type {
 import {
 	isBodySectionField,
 	isLiteratureType,
-	isPaperAiStatus,
 	PAPER_AI_PROPERTY_SCHEMA,
-	PAPER_PROPERTY_SCHEMA_VERSION,
 } from './paper-property-schema';
 import {
 	buildOverviewMarkdown,
 	replaceOverviewSection,
 } from './paper-overview';
 import type {
+	PaperAnalysisMetadata,
 	PaperAiProperties,
-	PaperAiSystemProperties,
 	PaperPropertyUpdates,
 } from './paper-property-schema';
 
@@ -34,17 +32,13 @@ const ANNOTATIONS_FILENAME = 'annotations.json';
 
 type Frontmatter = Record<string, unknown>;
 
-const INTERNAL_FRONTMATTER_KEYS = new Set<string>([
-	'paper_manager',
-	'schema_version',
-	'paper_id',
+const LEGACY_AI_FRONTMATTER_KEYS = [
+	'ai_status',
 	'ai_schema_version',
-	'original_filename',
-	'file_hash',
-	'source_pdf',
-	'pdf',
-	'annotations_file',
-]);
+	'ai_model',
+	'ai_updated_at',
+	'ai_error',
+] as const;
 
 export class PaperLibraryRepository {
 	constructor(
@@ -186,18 +180,17 @@ export class PaperLibraryRepository {
 				}
 			}
 
-			for (const field of AI_SYSTEM_PROPERTY_SCHEMA) {
-				if (hasOwn(updates, field.id)) {
-					writeFrontmatterValue(
-						properties,
-						field.frontmatterKey,
-						updates[field.id],
-					);
-				}
+			if (hasOwn(updates, 'analyzedAt')) {
+				writeFrontmatterValue(
+					properties,
+					'analyzed_at',
+					updates.analyzedAt,
+				);
 			}
 
-			properties.ai_schema_version =
-				updates.aiSchemaVersion ?? PAPER_PROPERTY_SCHEMA_VERSION;
+			for (const key of LEGACY_AI_FRONTMATTER_KEYS) {
+				delete properties[key];
+			}
 			properties.updated_at = updatedAt;
 		});
 
@@ -317,16 +310,6 @@ export class PaperLibraryRepository {
 				},
 				title,
 			),
-			properties: paperPropertiesMap({
-				title,
-				authors: [],
-				status: 'unread',
-				ai_status: 'not_started',
-				ai_model: '',
-				ai_error: '',
-				created_at: createdAt,
-				updated_at: createdAt,
-			}),
 			id,
 			status: 'unread',
 			originalFilename: file.name,
@@ -346,12 +329,16 @@ export class PaperLibraryRepository {
 		const cachedFrontmatter = fresh
 			? null
 			: this.app.metadataCache.getFileCache(file)?.frontmatter;
-		const frontmatter =
+		const loadedFrontmatter =
 			cachedFrontmatter ?? (await this.readFrontmatter(file));
 
-		if (frontmatter?.paper_manager !== true) {
+		if (loadedFrontmatter?.paper_manager !== true) {
 			return null;
 		}
+		const frontmatter = await this.migrateLegacyAiProperties(
+			file,
+			loadedFrontmatter,
+		);
 
 		const parentFolder = file.parent;
 		const folderPath = parentFolder?.path;
@@ -378,7 +365,6 @@ export class PaperLibraryRepository {
 
 		return {
 			...paperPropertiesFromFrontmatter(frontmatter, title),
-			properties: paperPropertiesMap(frontmatter),
 			id,
 			status: paperStatus(frontmatter.status),
 			originalFilename,
@@ -391,6 +377,44 @@ export class PaperLibraryRepository {
 			),
 			createdAt,
 		};
+	}
+
+	private async migrateLegacyAiProperties(
+		file: TFile,
+		frontmatter: Frontmatter,
+	): Promise<Frontmatter> {
+		if (!LEGACY_AI_FRONTMATTER_KEYS.some((key) => hasOwn(frontmatter, key))) {
+			return frontmatter;
+		}
+
+		const migrated = { ...frontmatter };
+		if (
+			!stringValue(migrated.analyzed_at) &&
+			migrated.ai_status === 'completed'
+		) {
+			migrated.analyzed_at =
+				stringValue(migrated.ai_updated_at) ||
+				stringValue(migrated.updated_at) ||
+				new Date(file.stat.mtime).toISOString();
+		}
+		for (const key of LEGACY_AI_FRONTMATTER_KEYS) {
+			delete migrated[key];
+		}
+
+		await this.app.fileManager.processFrontMatter(file, (properties) => {
+			const current = properties as Frontmatter;
+			if (
+				!stringValue(current.analyzed_at) &&
+				current.ai_status === 'completed'
+			) {
+				current.analyzed_at = migrated.analyzed_at;
+			}
+			for (const key of LEGACY_AI_FRONTMATTER_KEYS) {
+				delete current[key];
+			}
+		});
+
+		return migrated;
 	}
 
 	private async readFrontmatter(file: TFile): Promise<Frontmatter | null> {
@@ -438,10 +462,6 @@ paper_id: ${yamlString(input.id)}
 title: ${yamlString(input.title)}
 authors: []
 status: unread
-ai_status: not_started
-ai_schema_version: ${PAPER_PROPERTY_SCHEMA_VERSION}
-ai_model: ""
-ai_error: ""
 original_filename: ${yamlString(input.originalFilename)}
 file_hash: ${yamlString(input.fileHash)}
 source_pdf: ${yamlString('[[source.pdf]]')}
@@ -504,18 +524,10 @@ function numberValue(value: unknown): number | undefined {
 	return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
-const AI_SYSTEM_PROPERTY_SCHEMA = [
-	{ id: 'aiStatus', frontmatterKey: 'ai_status' },
-	{ id: 'aiSchemaVersion', frontmatterKey: 'ai_schema_version' },
-	{ id: 'aiModel', frontmatterKey: 'ai_model' },
-	{ id: 'aiUpdatedAt', frontmatterKey: 'ai_updated_at' },
-	{ id: 'aiError', frontmatterKey: 'ai_error' },
-] as const;
-
 function paperPropertiesFromFrontmatter(
 	frontmatter: Frontmatter,
 	fallbackTitle: string,
-): PaperAiProperties & PaperAiSystemProperties {
+): PaperAiProperties & PaperAnalysisMetadata {
 	return {
 		literatureType: isLiteratureType(frontmatter.literature_type)
 			? frontmatter.literature_type
@@ -534,32 +546,8 @@ function paperPropertiesFromFrontmatter(
 		applicationValue: stringValue(frontmatter.application_value),
 		limitations: stringValue(frontmatter.limitations),
 		futureDirections: stringValue(frontmatter.future_directions),
-		aiStatus: isPaperAiStatus(frontmatter.ai_status)
-			? frontmatter.ai_status
-			: 'not_started',
-		aiSchemaVersion:
-			numberValue(frontmatter.ai_schema_version) ??
-			PAPER_PROPERTY_SCHEMA_VERSION,
-		aiModel: stringValue(frontmatter.ai_model),
-		aiUpdatedAt: stringValue(frontmatter.ai_updated_at) || null,
-		aiError: stringValue(frontmatter.ai_error),
+		analyzedAt: stringValue(frontmatter.analyzed_at) || null,
 	};
-}
-
-function paperPropertiesMap(frontmatter: Frontmatter): Record<string, unknown> {
-	const properties: Record<string, unknown> = {};
-
-	for (const [key, value] of Object.entries(frontmatter)) {
-		if (INTERNAL_FRONTMATTER_KEYS.has(key)) {
-			continue;
-		}
-		if (value === null || value === undefined) {
-			continue;
-		}
-		properties[key] = value;
-	}
-
-	return properties;
 }
 
 function writeFrontmatterValue(

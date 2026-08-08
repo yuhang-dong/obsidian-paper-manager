@@ -1,8 +1,5 @@
 import {
 	type ChangeEvent,
-	type CSSProperties,
-	type ReactNode,
-	type RefObject,
 	useCallback,
 	useEffect,
 	useMemo,
@@ -10,31 +7,28 @@ import {
 	useState,
 } from 'react';
 import {
-	Check,
-	Columns3,
+	ChevronDown,
 	FileText,
+	ListFilter,
 	LoaderCircle,
 	Search,
-	SlidersHorizontal,
 	Sparkles,
 	Trash2,
 	Upload,
-	X,
 } from 'lucide-react';
 import { Notice } from 'obsidian';
 import {
-	type Column,
-	columnSizingFeature,
-	columnVisibilityFeature,
 	createColumnHelper,
-	rowSelectionFeature,
 	tableFeatures,
 	useTable,
 } from '@tanstack/react-table';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+	ColumnFilterMenu,
+	type ColumnFilterOption,
+} from '@/components/column-filter-menu';
+import { EditableTagCell } from '@/components/editable-tag-cell';
 import { Input } from '@/components/ui/input';
-import { ColumnsPanel } from '@/components/columns-panel';
 import { StatusMenu } from '@/components/status-menu';
 import {
 	Table,
@@ -51,27 +45,15 @@ import {
 	type PaperAnalysisStage,
 } from '@/ai/paper-analysis';
 import {
-	LITERATURE_TYPE_OPTIONS,
-	type ObsidianPropertyType,
-} from '@/papers/paper-property-schema';
-import type { LibraryTableSettings } from '@/settings';
-import { humanizeStatus } from '@/papers/paper-status';
-import {
-	SPECIAL_COLUMN_IDS,
-	buildLibraryColumns,
-	cloneLibraryTableSettings,
-	formatPropertyValue,
-	stringifyPropertyValue,
-	type LibraryColumnMeta,
-} from '@/library/column-config';
+	PAPER_STATUS_ORDER,
+	humanizeStatus,
+} from '@/papers/paper-status';
 import FakeProgress from 'fake-progress';
 
 interface PaperLibraryPageProps {
 	repository: PaperLibraryRepository;
 	getBillingKey: () => string;
 	confirmDeletePaper: (paper: PaperRecord) => Promise<boolean>;
-	initialTableSettings: LibraryTableSettings;
-	saveTableSettings: (settings: LibraryTableSettings) => Promise<void>;
 }
 
 interface ActivePaperAnalysis {
@@ -86,25 +68,38 @@ interface StatusMenuState {
 	anchor: HTMLButtonElement;
 }
 
-const paperTableFeatures = tableFeatures({
-	rowSelectionFeature,
-	columnVisibilityFeature,
-	columnSizingFeature,
-});
+interface TableScrollEdges {
+	left: boolean;
+	right: boolean;
+}
+
+type FilterColumn = 'status' | 'keywords' | 'year' | 'authors';
+
+type PaperFilters = Record<FilterColumn, string[]>;
+
+interface FilterMenuState {
+	column: FilterColumn;
+	anchor: HTMLButtonElement;
+}
+
+const FILTER_LABELS: Record<FilterColumn, string> = {
+	status: 'Status',
+	keywords: 'Keywords',
+	year: 'Year',
+	authors: 'Authors',
+};
+
+const paperTableFeatures = tableFeatures({});
 
 const paperColumnHelper = createColumnHelper<
 	typeof paperTableFeatures,
 	PaperRecord
 >();
 
-type PaperColumn = Column<typeof paperTableFeatures, PaperRecord, unknown>;
-
 export function PaperLibraryPage({
 	repository,
 	getBillingKey,
 	confirmDeletePaper,
-	initialTableSettings,
-	saveTableSettings,
 }: PaperLibraryPageProps) {
 	const fileInputRef = useRef<HTMLInputElement>(null);
 	const [papers, setPapers] = useState<PaperRecord[]>([]);
@@ -114,18 +109,44 @@ export function PaperLibraryPage({
 	const [activeAnalysis, setActiveAnalysis] =
 		useState<ActivePaperAnalysis | null>(null);
 	const [deletingPaperId, setDeletingPaperId] = useState<string | null>(null);
-	const [tableSettings, setTableSettings] = useState<LibraryTableSettings>(() =>
-		cloneLibraryTableSettings(initialTableSettings),
-	);
-	const [columnsOpen, setColumnsOpen] = useState(false);
 	const [statusMenu, setStatusMenu] = useState<StatusMenuState | null>(null);
-	const columnsToolbarRef = useRef<HTMLDivElement>(null);
+	const [filterMenu, setFilterMenu] = useState<FilterMenuState | null>(null);
+	const [filters, setFilters] = useState<PaperFilters>({
+		status: [],
+		keywords: [],
+		year: [],
+		authors: [],
+	});
+	const [tableScrollEdges, setTableScrollEdges] = useState<TableScrollEdges>({
+		left: false,
+		right: false,
+	});
+	const tableContainerRef = useRef<HTMLDivElement>(null);
 	const activeAnalysisRef = useRef<ActivePaperAnalysis | null>(null);
 	activeAnalysisRef.current = activeAnalysis;
 	const deletingPaperIdRef = useRef<string | null>(null);
 	deletingPaperIdRef.current = deletingPaperId;
 	const statusMenuRef = useRef<StatusMenuState | null>(null);
 	statusMenuRef.current = statusMenu;
+
+	const updateTableScrollEdges = useCallback(
+		(container: HTMLDivElement): void => {
+			const maxScrollLeft = Math.max(
+				0,
+				container.scrollWidth - container.clientWidth,
+			);
+			const next = {
+				left: container.scrollLeft > 1,
+				right: maxScrollLeft - container.scrollLeft > 1,
+			};
+			setTableScrollEdges((current) =>
+				current.left === next.left && current.right === next.right
+					? current
+					: next,
+			);
+		},
+		[],
+	);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -153,81 +174,38 @@ export function PaperLibraryPage({
 		};
 	}, [repository]);
 
-	const filteredPapers = useMemo(() => {
-		const normalizedQuery = query.trim().toLocaleLowerCase();
-		if (!normalizedQuery) {
-			return papers;
-		}
-
-		return papers.filter((paper) =>
-			paperSearchText(paper).includes(normalizedQuery),
-		);
-	}, [papers, query]);
-
-	const libraryColumns = useMemo(
-		() => buildLibraryColumns(papers, tableSettings),
-		[papers, tableSettings],
-	);
-
-	const allColumnIds = useMemo(
-		() => libraryColumns.map((column) => column.id),
-		[libraryColumns],
-	);
-
-	const handleToggleVisibility = useCallback((id: string): void => {
-		if (id === SPECIAL_COLUMN_IDS.select) {
+	useEffect(() => {
+		const container = tableContainerRef.current;
+		if (!container) {
 			return;
 		}
-		const defaultVisible =
-			libraryColumns.find((column) => column.id === id)?.defaultVisible ??
-			true;
-		setTableSettings((current) => {
-			const visibility = { ...current.visibility };
-			visibility[id] = !(current.visibility[id] ?? defaultVisible);
-			return { ...current, visibility };
-		});
-	}, [libraryColumns]);
 
-	const handleAddCustom = useCallback(
-		(property: string, type: ObsidianPropertyType): void => {
-			setTableSettings((current) => {
-				if (
-					allColumnIds.includes(property) ||
-					current.customColumns.some((column) => column.property === property)
-				) {
-					return current;
-				}
-				return {
-					...current,
-					customColumns: [...current.customColumns, { property, type }],
-				};
-			});
-		},
-		[allColumnIds],
+		const update = () => updateTableScrollEdges(container);
+		update();
+		const observer = new ResizeObserver(update);
+		observer.observe(container);
+		const tableElement = container.querySelector('table');
+		if (tableElement) {
+			observer.observe(tableElement);
+		}
+
+		return () => observer.disconnect();
+	}, [updateTableScrollEdges]);
+
+	const filterOptions = useMemo(
+		() => buildFilterOptions(papers),
+		[papers],
 	);
 
-	const handleRemoveCustom = useCallback((id: string): void => {
-		setTableSettings((current) => {
-			const visibility = { ...current.visibility };
-			delete visibility[id];
-			return {
-				...current,
-				visibility,
-				customColumns: current.customColumns.filter(
-					(column) => column.property !== id,
-				),
-			};
-		});
-	}, []);
-
-	const handleShowAll = useCallback((): void => {
-		setTableSettings((current) => ({
-			...current,
-			visibility: Object.fromEntries(
-				allColumnIds.map((id) => [id, true]),
-			),
-		}));
-	}, [allColumnIds]);
+	const filteredPapers = useMemo(() => {
+		const normalizedQuery = query.trim().toLocaleLowerCase();
+		return papers.filter(
+			(paper) =>
+				paperMatchesFilters(paper, filters) &&
+				(!normalizedQuery ||
+					paper.title.toLocaleLowerCase().includes(normalizedQuery)),
+		);
+	}, [papers, query, filters]);
 
 	function chooseFiles(): void {
 		if (fileInputRef.current) {
@@ -378,6 +356,7 @@ export function PaperLibraryPage({
 
 	const handleToggleStatusMenu = useCallback(
 		(paper: PaperRecord, anchor: HTMLButtonElement): void => {
+			setFilterMenu(null);
 			setStatusMenu((current) =>
 				current?.paper.id === paper.id ? null : { paper, anchor },
 			);
@@ -398,188 +377,258 @@ export function PaperLibraryPage({
 		[repository],
 	);
 
+	const handleToggleFilterMenu = useCallback(
+		(column: FilterColumn, anchor: HTMLButtonElement): void => {
+			setStatusMenu(null);
+			setFilterMenu((current) =>
+				current?.column === column ? null : { column, anchor },
+			);
+		},
+		[],
+	);
+
+	const handleToggleFilterValue = useCallback(
+		(column: FilterColumn, value: string): void => {
+			setFilters((current) => {
+				const selected = new Set(current[column]);
+				if (selected.has(value)) {
+					selected.delete(value);
+				} else {
+					selected.add(value);
+				}
+				return { ...current, [column]: Array.from(selected) };
+			});
+		},
+		[],
+	);
+
+	const handleClearFilter = useCallback((column: FilterColumn): void => {
+		setFilters((current) => ({ ...current, [column]: [] }));
+	}, []);
+
+	const handleUpdateListProperty = useCallback(
+		async (
+			paper: PaperRecord,
+			property: 'authors' | 'keywords',
+			values: string[],
+		): Promise<void> => {
+			try {
+				const updates =
+					property === 'authors' ? { authors: values } : { keywords: values };
+				const updated = await repository.updatePaperProperties(paper, updates);
+				setPapers((current) => mergePapers(current, [updated]));
+			} catch (error) {
+				new Notice(`Could not update ${property}: ${errorMessage(error)}`);
+				throw error;
+			}
+		},
+		[repository],
+	);
+
 	const columns = useMemo(
 		() =>
-			paperColumnHelper.columns(
-				libraryColumns.map((column) => {
-					if (column.id === SPECIAL_COLUMN_IDS.select) {
-						return paperColumnHelper.display({
-							id: column.id,
-							size: column.size,
-							header: ({ table }) => (
-								<input
-									type="checkbox"
-									aria-label="Select all papers"
-									className="size-4 accent-[var(--interactive-accent)]"
-									checked={table.getIsAllRowsSelected()}
-									disabled={table.getRowModel().rows.length === 0}
-									onChange={table.getToggleAllRowsSelectedHandler()}
-								/>
-							),
-							cell: ({ row }) => (
-								<input
-									type="checkbox"
-									aria-label={`Select ${row.original.title}`}
-									className="size-4 accent-[var(--interactive-accent)]"
-									checked={row.getIsSelected()}
-									onChange={row.getToggleSelectedHandler()}
-								/>
-							),
-						});
-					}
-
-					if (column.id === SPECIAL_COLUMN_IDS.actions) {
-						return paperColumnHelper.display({
-							id: column.id,
-							size: column.size,
-						header: () => <ColumnHeaderLabel label={column.label} />,
-						cell: ({ row }) => {
-							const paper = row.original;
-							const analysis = activeAnalysisRef.current;
-							const isActive =
-								analysis?.paperId === paper.id;
-							const isAnotherActive =
-								analysis !== null && !isActive;
-							const isComplete = paper.aiStatus === 'completed';
-							const isDeleting =
-								deletingPaperIdRef.current === paper.id;
-
-								return (
-									<div className="flex items-center gap-1.5">
-										<Button
-											variant={isComplete ? 'ghost' : 'outline'}
-											size="sm"
-											disabled={isAnotherActive || isActive}
-											title={
-												paper.aiStatus === 'failed' && paper.aiError
-													? paper.aiError
-													: isComplete
-														? 'Analyze again (uses credits)'
-														: 'Analyze this PDF (uses credits)'
-											}
-											onClick={() => void handleAnalyzePaper(paper)}
-										>
-											{isActive ? (
-												<span className="flex flex-col items-center gap-1">
-													<span className="flex items-center gap-1.5">
-														<LoaderCircle className="animate-spin" />
-														<span className="w-10 text-center tabular-nums">
-															{Math.round(analysis.progress)}%
-														</span>
-													</span>
-													<span className="h-1 w-16 overflow-hidden rounded-full bg-muted">
-														<span
-															className="block h-full rounded-full bg-primary transition-[width] duration-500 ease-linear"
-															style={{
-																width: `${analysis.progress}%`,
-															}}
-														/>
-													</span>
-												</span>
-											) : (
-												<>
-													<Sparkles />
-													{isComplete
-														? 'Reanalyze'
-														: paper.aiStatus === 'failed'
-															? 'Retry'
-															: 'Analyze'}
-												</>
-											)}
-										</Button>
-										<Button
-											variant="ghost"
-											size="icon"
-											className="shrink-0 text-muted-foreground hover:text-destructive"
-											disabled={
-												deletingPaperIdRef.current !== null ||
-												analysis !== null
-											}
-											title="Delete paper"
-											aria-label={`Delete ${paper.title}`}
-											onClick={() => void handleDeletePaper(paper)}
-										>
-											{isDeleting ? (
-												<LoaderCircle className="animate-spin" />
-											) : (
-												<Trash2 />
-											)}
-										</Button>
-									</div>
-								);
-							},
-						});
-					}
-
-					return paperColumnHelper.accessor(
-						(paper) => paper.properties[column.id],
-						{
-							id: column.id,
-							size: column.size,
-							header: () => <ColumnHeaderLabel label={column.label} />,
-							cell: ({ row }) =>
-								renderPropertyCell(
-									column,
-									row.original,
-									repository,
-									statusMenuRef,
-									handleToggleStatusMenu,
-								),
-						},
-					);
+			paperColumnHelper.columns([
+				paperColumnHelper.accessor('title', {
+					header: 'Title',
+					cell: ({ row }) => (
+						<button
+							type="button"
+							className="paper-manager-title-link"
+							title={row.original.originalFilename}
+							onClick={() => {
+								void repository.openIndex(row.original).catch((error: unknown) => {
+									new Notice(`Could not open paper: ${errorMessage(error)}`);
+								});
+							}}
+						>
+							{row.original.title}
+						</button>
+					),
 				}),
-			),
+				paperColumnHelper.accessor('status', {
+					header: () => (
+						<FilterableColumnHeader
+							label="Status"
+							activeCount={filters.status.length}
+							onClick={(anchor) =>
+								handleToggleFilterMenu('status', anchor)
+							}
+						/>
+					),
+					cell: ({ row }) => {
+						const paper = row.original;
+						const isOpen = statusMenuRef.current?.paper.id === paper.id;
+						return (
+							<button
+								type="button"
+								className="paper-manager-status-trigger"
+								data-status={paper.status}
+								data-open={isOpen || undefined}
+								title="Change reading status"
+								aria-haspopup="menu"
+								aria-expanded={isOpen}
+								onClick={(event) =>
+									handleToggleStatusMenu(paper, event.currentTarget)
+								}
+							>
+								<span className="paper-manager-status-dot" aria-hidden="true" />
+								<span>{humanizeStatus(paper.status)}</span>
+								<ChevronDown aria-hidden="true" />
+							</button>
+						);
+					},
+				}),
+				paperColumnHelper.accessor('keywords', {
+					header: () => (
+						<FilterableColumnHeader
+							label="Keywords"
+							activeCount={filters.keywords.length}
+							onClick={(anchor) =>
+								handleToggleFilterMenu('keywords', anchor)
+							}
+						/>
+					),
+					cell: ({ row }) => {
+						const paper = row.original;
+						return (
+							<EditableTagCell
+								values={paper.keywords}
+								label="keywords"
+								placeholder="Add keyword"
+								onSave={(keywords) =>
+									handleUpdateListProperty(paper, 'keywords', keywords)
+								}
+							/>
+						);
+					},
+				}),
+				paperColumnHelper.accessor('year', {
+					header: () => (
+						<FilterableColumnHeader
+							label="Year"
+							activeCount={filters.year.length}
+							onClick={(anchor) =>
+								handleToggleFilterMenu('year', anchor)
+							}
+						/>
+					),
+					cell: ({ row }) => (
+						<span className="text-muted-foreground">
+							{row.original.year ?? '—'}
+						</span>
+					),
+				}),
+				paperColumnHelper.accessor('authors', {
+					header: () => (
+						<FilterableColumnHeader
+							label="Authors"
+							activeCount={filters.authors.length}
+							onClick={(anchor) =>
+								handleToggleFilterMenu('authors', anchor)
+							}
+						/>
+					),
+					cell: ({ row }) => {
+						const paper = row.original;
+						return (
+							<EditableTagCell
+								values={paper.authors}
+								label="authors"
+								placeholder="Add author"
+								onSave={(authors) =>
+									handleUpdateListProperty(paper, 'authors', authors)
+								}
+							/>
+						);
+					},
+				}),
+				paperColumnHelper.display({
+					id: 'actions',
+					header: 'Actions',
+					cell: ({ row }) => {
+						const paper = row.original;
+						const analysis = activeAnalysisRef.current;
+						const isActive = analysis?.paperId === paper.id;
+						const isAnotherActive = analysis !== null && !isActive;
+						const isAnalyzed = paper.analyzedAt !== null;
+						const isDeleting = deletingPaperIdRef.current === paper.id;
+						return (
+							<div className="flex items-center gap-1.5">
+								<Button
+									variant={isAnalyzed ? 'ghost' : 'outline'}
+									size="sm"
+									disabled={isAnotherActive || isActive}
+									title={
+										isAnalyzed
+											? 'Analyze again (uses credits)'
+											: 'Analyze this PDF (uses credits)'
+									}
+									onClick={() => void handleAnalyzePaper(paper)}
+								>
+									{isActive ? (
+										<span className="flex flex-col items-center gap-1">
+											<span className="flex items-center gap-1.5">
+												<LoaderCircle className="animate-spin" />
+												<span className="w-10 text-center tabular-nums">
+													{Math.round(analysis.progress)}%
+												</span>
+											</span>
+											<span className="h-1 w-16 overflow-hidden rounded-full bg-muted">
+												<span
+													className="block h-full rounded-full bg-primary transition-[width] duration-500 ease-linear"
+													style={{ width: `${analysis.progress}%` }}
+												/>
+											</span>
+										</span>
+									) : (
+										<>
+											<Sparkles />
+											{isAnalyzed ? 'Reanalyze' : 'Analyze'}
+										</>
+									)}
+								</Button>
+								<Button
+									variant="ghost"
+									size="icon"
+									className="text-muted-foreground hover:text-destructive"
+									disabled={
+										deletingPaperIdRef.current !== null || analysis !== null
+									}
+									title="Delete paper"
+									aria-label={`Delete ${paper.title}`}
+									onClick={() => void handleDeletePaper(paper)}
+								>
+									{isDeleting ? (
+										<LoaderCircle className="animate-spin" />
+									) : (
+										<Trash2 />
+									)}
+								</Button>
+							</div>
+						);
+					},
+				}),
+			]),
 		[
-			libraryColumns,
 			repository,
 			handleAnalyzePaper,
 			handleDeletePaper,
+			handleUpdateListProperty,
+			handleToggleFilterMenu,
+			filters,
 			statusMenuRef,
 			handleToggleStatusMenu,
 		],
 	);
 
-	const table = useTable(
-		{
-			features: paperTableFeatures,
-			columns,
-			data: filteredPapers,
-			getRowId: (paper) => paper.id,
-			initialState: {
-				columnVisibility: resolveColumnVisibility(
-					tableSettings.visibility,
-					libraryColumns,
-				),
-			},
-		},
-		(state) => ({
-			columnVisibility: state.columnVisibility,
-			rowSelection: state.rowSelection,
-		}),
-	);
-
-	// Push user layout changes (settings) into the table state.
-	useEffect(() => {
-		if (isLoading) {
-			return;
-		}
-
-		const nextVisibility = resolveColumnVisibility(
-			tableSettings.visibility,
-			libraryColumns,
-		);
-		if (!visibilityEqual(table.state.columnVisibility, nextVisibility)) {
-			table.setColumnVisibility(nextVisibility);
-		}
-	}, [isLoading, tableSettings.visibility, table.state.columnVisibility, table]);
-
-	// Persist layout settings.
-	useEffect(() => {
-		void saveTableSettings(tableSettings);
-	}, [tableSettings, saveTableSettings]);
+	const table = useTable({
+		features: paperTableFeatures,
+		columns,
+		data: filteredPapers,
+		getRowId: (paper) => paper.id,
+	});
 
 	const visibleRows = table.getRowModel().rows;
-	const selectedCount = Object.keys(table.state.rowSelection).length;
 
 	return (
 		<div className="flex min-h-full flex-col bg-background text-foreground">
@@ -591,6 +640,33 @@ export function PaperLibraryPage({
 				className="hidden"
 				onChange={(event) => void handleFileSelection(event)}
 			/>
+			{statusMenu ? (
+				<StatusMenu
+					anchor={statusMenu.anchor}
+					currentStatus={statusMenu.paper.status}
+					onSelect={(status) =>
+						void handleSelectStatus(statusMenu.paper, status)
+					}
+					onClose={() => setStatusMenu(null)}
+				/>
+			) : null}
+			{filterMenu ? (
+				<ColumnFilterMenu
+					anchor={filterMenu.anchor}
+					title={FILTER_LABELS[filterMenu.column]}
+					options={filterOptions[filterMenu.column]}
+					selectedValues={filters[filterMenu.column]}
+					searchable={
+						filterMenu.column === 'keywords' ||
+						filterMenu.column === 'authors'
+					}
+					onToggle={(value) =>
+						handleToggleFilterValue(filterMenu.column, value)
+					}
+					onClear={() => handleClearFilter(filterMenu.column)}
+					onClose={() => setFilterMenu(null)}
+				/>
+			) : null}
 
 			<main className="flex flex-1 p-6">
 				<section className="flex-1 overflow-hidden rounded-lg border border-border bg-card text-card-foreground shadow-xs">
@@ -606,45 +682,6 @@ export function PaperLibraryPage({
 									onChange={(event) => setQuery(event.target.value)}
 								/>
 							</div>
-							<Button variant="outline" disabled>
-								<SlidersHorizontal />
-								Filter
-							</Button>
-							<div ref={columnsToolbarRef} className="relative">
-								<Button
-									variant="outline"
-									onClick={() => setColumnsOpen((open) => !open)}
-								>
-									<Columns3 />
-									Columns
-								</Button>
-								{columnsOpen ? (
-									<ColumnsPanel
-										anchorRef={columnsToolbarRef}
-										columns={libraryColumns}
-										existingIds={allColumnIds}
-										visibility={tableSettings.visibility}
-										onClose={() => setColumnsOpen(false)}
-										onToggleVisibility={handleToggleVisibility}
-										onAddCustom={handleAddCustom}
-										onRemoveCustom={handleRemoveCustom}
-										onShowAll={handleShowAll}
-									/>
-								) : null}
-								{statusMenu ? (
-									<StatusMenu
-										anchor={statusMenu.anchor}
-										currentStatus={statusMenu.paper.status}
-										onSelect={(status) =>
-											void handleSelectStatus(
-												statusMenu.paper,
-												status,
-											)
-										}
-										onClose={() => setStatusMenu(null)}
-									/>
-								) : null}
-							</div>
 						</div>
 						<Button
 							className="mod-cta"
@@ -659,18 +696,22 @@ export function PaperLibraryPage({
 							{isImporting ? 'Importing…' : 'Import papers'}
 						</Button>
 					</div>
-					<Table className="table-fixed">
+					<Table
+						className="paper-manager-library-table"
+						containerRef={tableContainerRef}
+						onContainerScroll={(event) =>
+							updateTableScrollEdges(event.currentTarget)
+						}
+						data-pinned-left-shadow={tableScrollEdges.left || undefined}
+						data-pinned-right-shadow={tableScrollEdges.right || undefined}
+					>
 						<TableHeader>
 							{table.getHeaderGroups().map((headerGroup) => (
-								<TableRow
-									key={headerGroup.id}
-									className="group hover:bg-transparent"
-								>
+								<TableRow key={headerGroup.id} className="hover:bg-transparent">
 									{headerGroup.headers.map((header) => (
 										<TableHead
 											key={header.id}
-											className="bg-card"
-											style={cellStyle(header.column)}
+											className={columnClassName(header.column.id)}
 										>
 											{header.isPlaceholder ? null : (
 												<table.FlexRender header={header} />
@@ -690,17 +731,11 @@ export function PaperLibraryPage({
 								/>
 							) : (
 								visibleRows.map((row) => (
-									<TableRow
-										key={row.id}
-										data-state={
-											row.getIsSelected() ? 'selected' : undefined
-										}
-										className="group"
-									>
-										{row.getVisibleCells().map((cell) => (
+									<TableRow key={row.id}>
+										{row.getAllCells().map((cell) => (
 											<TableCell
 												key={cell.id}
-												style={cellStyle(cell.column)}
+												className={columnClassName(cell.column.id)}
 											>
 												<table.FlexRender cell={cell} />
 											</TableCell>
@@ -714,7 +749,6 @@ export function PaperLibraryPage({
 						{filteredPapers.length === papers.length
 							? `${papers.length} ${papers.length === 1 ? 'paper' : 'papers'}`
 							: `${filteredPapers.length} of ${papers.length} papers`}
-						{selectedCount > 0 ? ` · ${selectedCount} selected` : ''}
 					</footer>
 				</section>
 			</main>
@@ -722,189 +756,127 @@ export function PaperLibraryPage({
 	);
 }
 
-function ColumnHeaderLabel({
+function FilterableColumnHeader({
 	label,
+	activeCount,
+	onClick,
 }: {
 	label: string;
+	activeCount: number;
+	onClick: (anchor: HTMLButtonElement) => void;
 }) {
-	return <span className="block truncate">{label}</span>;
-}
-
-function renderPropertyCell(
-	column: LibraryColumnMeta,
-	paper: PaperRecord,
-	repository: PaperLibraryRepository,
-	statusMenuRef: RefObject<StatusMenuState | null>,
-	toggleStatusMenu: (
-		paper: PaperRecord,
-		anchor: HTMLButtonElement,
-	) => void,
-): ReactNode {
-	if (column.id === 'title') {
-		return (
-			<button
-				type="button"
-				className="block max-w-full cursor-pointer truncate text-left font-medium text-foreground hover:text-[var(--text-accent)] hover:underline"
-				title={paper.originalFilename}
-				onClick={() => {
-					void repository
-						.openIndex(paper)
-						.catch((error: unknown) => {
-							new Notice(
-								`Could not open paper: ${errorMessage(error)}`,
-							);
-						});
-				}}
-			>
-				{paper.title}
-			</button>
-		);
-	}
-
-	if (column.id === 'status') {
-		const isOpen = statusMenuRef.current?.paper.id === paper.id;
-		return (
-			<button
-				type="button"
-				className="cursor-pointer transition-opacity hover:opacity-70"
-				title="Change reading status"
-				aria-haspopup="menu"
-				aria-expanded={isOpen}
-				onClick={(event) => toggleStatusMenu(paper, event.currentTarget)}
-			>
-				<Badge variant="secondary">{humanizeStatus(paper.status)}</Badge>
-			</button>
-		);
-	}
-
-	if (column.id === 'ai_status') {
-		const variant =
-			paper.aiStatus === 'completed'
-				? 'default'
-				: paper.aiStatus === 'failed'
-					? 'outline'
-					: 'secondary';
-		return <Badge variant={variant}>{humanizeStatus(paper.aiStatus)}</Badge>;
-	}
-
-	if (column.id === 'literature_type' && paper.literatureType) {
-		const option = LITERATURE_TYPE_OPTIONS.find(
-			(candidate) => candidate.value === paper.literatureType,
-		);
-		return (
-			<span className="block truncate">
-				{option?.label ?? paper.literatureType}
-			</span>
-		);
-	}
-
 	return (
-		<PropertyValueCell
-			value={paper.properties[column.id]}
-			type={column.type}
-		/>
+		<button
+			type="button"
+			className="paper-manager-filter-header"
+			data-active={activeCount > 0 || undefined}
+			aria-label={`Filter by ${label}`}
+			onClick={(event) => onClick(event.currentTarget)}
+		>
+			<span>{label}</span>
+			{activeCount > 0 ? (
+				<span className="paper-manager-filter-header-count">
+					{activeCount}
+				</span>
+			) : null}
+			<ListFilter aria-hidden="true" />
+		</button>
 	);
 }
 
-function PropertyValueCell({
-	value,
-	type,
-}: {
-	value: unknown;
-	type: ObsidianPropertyType;
-}) {
-	if (
-		value === null ||
-		value === undefined ||
-		value === '' ||
-		(Array.isArray(value) && value.length === 0)
-	) {
-		return <span className="block text-muted-foreground">—</span>;
-	}
-
-	if (type === 'checkbox') {
-		return value ? (
-			<Check className="size-4 text-primary" />
-		) : (
-			<X className="size-4 text-muted-foreground" />
-		);
-	}
-
-	if (type === 'number') {
-		return (
-			<span className="block truncate text-right font-mono tabular-nums">
-				{formatPropertyValue(value, type)}
-			</span>
-		);
-	}
-
-	if (type === 'list') {
-		return (
-			<span className="block truncate text-muted-foreground">
-				{formatPropertyValue(value, type)}
-			</span>
-		);
-	}
-
-	return <span className="block truncate">{formatPropertyValue(value, type)}</span>;
+function paperMatchesFilters(
+	paper: PaperRecord,
+	filters: PaperFilters,
+): boolean {
+	return (
+		(filters.status.length === 0 || filters.status.includes(paper.status)) &&
+		(filters.year.length === 0 ||
+			(paper.year !== null && filters.year.includes(String(paper.year)))) &&
+		(filters.keywords.length === 0 ||
+			paper.keywords.some((keyword) => filters.keywords.includes(keyword))) &&
+		(filters.authors.length === 0 ||
+			paper.authors.some((author) => filters.authors.includes(author)))
+	);
 }
 
-function cellStyle(column: PaperColumn): CSSProperties {
-	return { width: column.getSize() };
-}
-
-function paperSearchText(paper: PaperRecord): string {
-	const values: string[] = [
-		paper.title,
-		paper.originalFilename,
-		...paper.authors,
+function buildFilterOptions(
+	papers: readonly PaperRecord[],
+): Record<FilterColumn, ColumnFilterOption[]> {
+	const discoveredStatuses = Array.from(
+		new Set(papers.map((paper) => paper.status)),
+	);
+	const statuses = [
+		...PAPER_STATUS_ORDER,
+		...discoveredStatuses
+			.filter(
+				(status) =>
+					!PAPER_STATUS_ORDER.includes(
+						status as (typeof PAPER_STATUS_ORDER)[number],
+					),
+			)
+			.sort((left, right) => left.localeCompare(right)),
 	];
 
-	for (const value of Object.values(paper.properties)) {
-		if (Array.isArray(value)) {
-			for (const item of value) {
-				if (item !== null && item !== undefined) {
-					values.push(stringifyPropertyValue(item));
-				}
-			}
-		} else if (value !== null && value !== undefined) {
-			values.push(stringifyPropertyValue(value));
-		}
-	}
-
-	return values.join(' ').toLocaleLowerCase();
+	return {
+		status: statuses.map((status) => ({
+			value: status,
+			label: humanizeStatus(status),
+			count: papers.filter((paper) => paper.status === status).length,
+		})),
+		keywords: buildValueOptions(papers, (paper) => paper.keywords),
+		year: Array.from(
+			new Set(
+				papers.flatMap((paper) =>
+					paper.year === null ? [] : [paper.year],
+				),
+			),
+		)
+			.sort((left, right) => right - left)
+			.map((year) => ({
+				value: String(year),
+				label: String(year),
+				count: papers.filter((paper) => paper.year === year).length,
+			})),
+		authors: buildValueOptions(papers, (paper) => paper.authors),
+	};
 }
 
-function visibilityEqual(
-	left: Readonly<Record<string, boolean>>,
-	right: Readonly<Record<string, boolean>>,
-): boolean {
-	const leftKeys = Object.keys(left);
-	const rightKeys = Object.keys(right);
-	if (leftKeys.length !== rightKeys.length) {
-		return false;
+function buildValueOptions(
+	papers: readonly PaperRecord[],
+	selectValues: (paper: PaperRecord) => readonly string[],
+): ColumnFilterOption[] {
+	const counts = new Map<string, number>();
+	for (const paper of papers) {
+		for (const value of new Set(selectValues(paper))) {
+			counts.set(value, (counts.get(value) ?? 0) + 1);
+		}
 	}
-	return leftKeys.every((key) => left[key] === right[key]);
+
+	return Array.from(counts, ([value, count]) => ({ value, label: value, count }))
+		.sort((left, right) => left.label.localeCompare(right.label));
 }
 
-function resolveColumnVisibility(
-	overrides: Readonly<Record<string, boolean>>,
-	columns: readonly LibraryColumnMeta[],
-): Record<string, boolean> {
-	const next: Record<string, boolean> = {};
-	for (const column of columns) {
-		if (column.id === SPECIAL_COLUMN_IDS.select) {
-			continue;
-		}
-		const explicit = overrides[column.id];
-		if (explicit === true) {
-			continue;
-		}
-		if (explicit === false || !column.defaultVisible) {
-			next[column.id] = false;
-		}
+function columnClassName(columnId: string): string | undefined {
+	if (columnId === 'title') {
+		return 'paper-manager-pinned-left paper-manager-title-column';
 	}
-	return next;
+	if (columnId === 'year') {
+		return 'paper-manager-year-column';
+	}
+	if (columnId === 'status') {
+		return 'paper-manager-status-column';
+	}
+	if (columnId === 'keywords') {
+		return 'paper-manager-keywords-column';
+	}
+	if (columnId === 'authors') {
+		return 'paper-manager-authors-column';
+	}
+	if (columnId === 'actions') {
+		return 'paper-manager-pinned-right paper-manager-actions-column';
+	}
+
+	return undefined;
 }
 
 function LoadingRow({ columnCount }: { columnCount: number }) {

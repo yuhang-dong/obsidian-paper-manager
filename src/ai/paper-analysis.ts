@@ -16,7 +16,6 @@ import {
 import { obsidianFetch } from './obsidian-fetch';
 import type { PaperLibraryRepository } from '@/papers/paper-library-repository';
 import {
-	PAPER_PROPERTY_SCHEMA_VERSION,
 	type LiteratureType,
 	type PaperAiProperties,
 } from '@/papers/paper-property-schema';
@@ -46,7 +45,11 @@ export const paperAnalysisSchema = z.object({
 		.nullable(),
 	title: z.string().min(1),
 	abstract: z.string(),
-	keywords: z.array(z.string()),
+	keywords: z
+		.array(z.string())
+		.describe(
+			'One combined list containing verbatim author-supplied keywords followed by additional full-paper keywords generated in Simplified Chinese.',
+		),
 	authors: z.array(z.string()),
 	researchBackground: z.string(),
 	researchResults: z.string(),
@@ -98,65 +101,32 @@ export async function analyzePaper({
 	onProgress,
 	abortSignal,
 }: AnalyzePaperOptions): Promise<AnalyzePaperResult> {
-	let currentPaper = paper;
+	onProgress?.('reading_pdf');
+	const pdfData = await repository.readSourcePdf(paper);
+	const pdfDataUrl = await arrayBufferToDataUrl(pdfData, 'application/pdf');
 
-	try {
-		onProgress?.('reading_pdf');
-		const pdfData = await repository.readSourcePdf(currentPaper);
-		const pdfDataUrl = await arrayBufferToDataUrl(pdfData, 'application/pdf');
+	onProgress?.('reserving_credits');
+	const usage = await startPaperManagerUsage({
+		key: billingKey,
+		requestId: crypto.randomUUID(),
+	});
 
-		currentPaper = await repository.updatePaperProperties(currentPaper, {
-			aiStatus: 'queued',
-			aiModel: PAPER_MANAGER_CHAT_MODEL,
-			aiError: '',
-		});
+	onProgress?.('analyzing');
+	const analysis = await requestPaperAnalysis({
+		paper,
+		pdfDataUrl,
+		usageToken: usage.usageToken,
+		abortSignal,
+	});
 
-		onProgress?.('reserving_credits');
-		const usage = await startPaperManagerUsage({
-			key: billingKey,
-			requestId: crypto.randomUUID(),
-		});
+	onProgress?.('saving');
+	let updatedPaper = await repository.updatePaperOverview(paper, analysis);
+	updatedPaper = await repository.updatePaperProperties(updatedPaper, {
+		...analysis,
+		analyzedAt: new Date().toISOString(),
+	});
 
-		currentPaper = await repository.updatePaperProperties(currentPaper, {
-			aiStatus: 'processing',
-		});
-		onProgress?.('analyzing');
-		const analysis = await requestPaperAnalysis({
-			paper: currentPaper,
-			pdfDataUrl,
-			usageToken: usage.usageToken,
-			abortSignal,
-		});
-
-		onProgress?.('saving');
-		currentPaper = await repository.updatePaperProperties(currentPaper, {
-			...analysis,
-			aiStatus: 'completed',
-			aiSchemaVersion: PAPER_PROPERTY_SCHEMA_VERSION,
-			aiModel: PAPER_MANAGER_CHAT_MODEL,
-			aiUpdatedAt: new Date().toISOString(),
-			aiError: '',
-		});
-		currentPaper = await repository.updatePaperOverview(
-			currentPaper,
-			analysis,
-		);
-
-		return { paper: currentPaper, usage };
-	} catch (error) {
-		try {
-			await repository.updatePaperProperties(currentPaper, {
-				aiStatus: 'failed',
-				aiModel: PAPER_MANAGER_CHAT_MODEL,
-				aiUpdatedAt: new Date().toISOString(),
-				aiError: errorMessage(error).slice(0, 500),
-			});
-		} catch (statusError) {
-			console.error('Could not persist paper analysis failure', statusError);
-		}
-
-		throw error;
-	}
+	return { paper: updatedPaper, usage };
 }
 
 async function requestPaperAnalysis({
@@ -241,7 +211,10 @@ async function requestPaperAnalysis({
 				if (!parsed.success) {
 					throw new Error('The AI returned paper data that does not match the schema');
 				}
-				analysis = parsed.data;
+				analysis = {
+					...parsed.data,
+					keywords: normalizeKeywords(parsed.data.keywords),
+				};
 			}
 			if (chunk.type === 'finish' && chunk.finishReason === 'error') {
 				throw new Error('The paper analysis model failed');
@@ -265,11 +238,14 @@ Analyze only the attached PDF. Never invent bibliographic facts, study details, 
 Output rules:
 - Call savePaperAnalysis exactly once and do not answer with prose outside the tool call.
 - Return every schema field.
+- Translate abstract faithfully into concise Simplified Chinese without summarizing, omitting claims, or adding interpretation. If the paper has no abstract, leave abstract empty.
 - Write researchBackground, researchResults, researchMethods, paperSummary, innovations, applicationValue, limitations, and futureDirections in concise Simplified Chinese.
 - These long-form sections are rendered as Obsidian markdown in the note body. Use markdown freely: bullet or numbered lists, bold/italic, blockquotes, wikilinks, and callouts such as > [!tip] or > [!warning]. Prefer lists over walls of text.
 - Do not emit level-2 (##) or level-3 (###) headings; the note already provides section headings. If you need sub-structure, use level-5 (#####) headings at most, or use lists.
-- Preserve the paper's original title, author names, journal name, and author-supplied keywords instead of translating them.
-- Preserve the original abstract when one is present. If no abstract is present, leave abstract empty.
+- Preserve the paper's original title, author names, and journal name instead of translating them.
+- keywords must be one combined, deduplicated list. Put every author-supplied keyword first, preserving its original wording and order, then append keywords inferred from the full paper in concise Simplified Chinese.
+- Even when author-supplied keywords exist, append 3 to 5 useful inferred keywords that add concepts not already covered. When the paper has no supplied keywords, generate 5 to 8 keywords from the full paper.
+- Generated keywords must be grounded in the paper and favor specific topics, methods, materials, populations, or application domains. Avoid generic terms such as "research", "paper", "study", or "method".
 - Keep authors in publication order and remove affiliations and footnote markers.
 - literatureType must use the closest allowed enum value. Use null only when the type cannot be determined.
 - Distinguish claims made by the authors from your own cautious evaluation, especially for innovations, application value, and limitations.
@@ -293,6 +269,19 @@ function arrayBufferToDataUrl(
 	});
 }
 
-function errorMessage(error: unknown): string {
-	return error instanceof Error ? error.message : String(error);
+function normalizeKeywords(keywords: readonly string[]): string[] {
+	const normalized: string[] = [];
+	const seen = new Set<string>();
+
+	for (const keyword of keywords) {
+		const value = keyword.trim().replace(/\s+/g, ' ');
+		const comparisonKey = value.toLocaleLowerCase();
+		if (!value || seen.has(comparisonKey)) {
+			continue;
+		}
+		seen.add(comparisonKey);
+		normalized.push(value);
+	}
+
+	return normalized;
 }

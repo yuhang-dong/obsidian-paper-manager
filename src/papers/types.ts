@@ -1,13 +1,13 @@
 import type {
+	PaperAnalysisMetadata,
 	PaperAiProperties,
-	PaperAiSystemProperties,
 } from './paper-property-schema';
 
 export type { PaperStatus } from './paper-status';
 
 export interface PaperRecord
 	extends PaperAiProperties,
-		PaperAiSystemProperties {
+		PaperAnalysisMetadata {
 	id: string;
 	/** Reading status; may be a user-written value from the frontmatter. */
 	status: string;
@@ -18,8 +18,6 @@ export interface PaperRecord
 	pdfPath: string;
 	annotationsPath: string;
 	createdAt: string;
-	/** Raw frontmatter properties (plugin-internal keys excluded). */
-	properties: Record<string, unknown>;
 }
 
 export interface PaperImportError {

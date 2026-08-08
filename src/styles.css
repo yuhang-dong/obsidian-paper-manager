@@ -55,6 +55,576 @@
 	border-color: var(--background-modifier-border);
 }
 
+.paper-manager-root .paper-manager-title-link {
+	appearance: none;
+	display: block;
+	max-width: 36rem;
+	margin: 0;
+	padding: 0;
+	overflow: hidden;
+	font: inherit;
+	font-weight: var(--font-medium);
+	line-height: inherit;
+	color: var(--text-normal);
+	text-align: left;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	cursor: pointer;
+	background-color: transparent !important;
+	background-image: none !important;
+	border: 0;
+	border-radius: 0;
+	box-shadow: none !important;
+}
+
+.paper-manager-root .paper-manager-title-link:hover {
+	color: var(--text-accent);
+	text-decoration: underline;
+	text-underline-offset: 2px;
+}
+
+.paper-manager-root .paper-manager-title-link:focus-visible {
+	color: var(--text-accent);
+	text-decoration: underline;
+	text-underline-offset: 2px;
+	outline: 2px solid var(--interactive-accent);
+	outline-offset: 2px;
+}
+
+.paper-manager-library-table {
+	min-width: 1272px;
+	border-collapse: separate;
+	border-spacing: 0;
+}
+
+.paper-manager-library-table .paper-manager-title-column {
+	width: 320px;
+	min-width: 320px;
+	max-width: 320px;
+}
+
+.paper-manager-library-table .paper-manager-status-column {
+	width: 128px;
+	min-width: 128px;
+}
+
+.paper-manager-library-table .paper-manager-keywords-column {
+	width: 280px;
+	min-width: 280px;
+	max-width: 280px;
+}
+
+.paper-manager-library-table .paper-manager-year-column {
+	width: 88px;
+	min-width: 88px;
+}
+
+.paper-manager-library-table .paper-manager-authors-column {
+	width: 280px;
+	min-width: 280px;
+	max-width: 280px;
+}
+
+.paper-manager-library-table .paper-manager-actions-column {
+	width: 176px;
+	min-width: 176px;
+}
+
+.paper-manager-library-table .paper-manager-pinned-left,
+.paper-manager-library-table .paper-manager-pinned-right {
+	position: sticky;
+	z-index: 2;
+	background-color: var(--background-primary);
+}
+
+.paper-manager-library-table th.paper-manager-pinned-left,
+.paper-manager-library-table th.paper-manager-pinned-right {
+	z-index: 3;
+}
+
+.paper-manager-library-table .paper-manager-pinned-left {
+	left: 0;
+	box-shadow: none;
+}
+
+.paper-manager-library-table[data-pinned-left-shadow]
+	.paper-manager-pinned-left {
+	box-shadow:
+		1px 0 0 var(--background-modifier-border),
+		8px 0 14px -14px var(--text-normal);
+}
+
+.paper-manager-library-table .paper-manager-pinned-right {
+	right: 0;
+	box-shadow: none;
+}
+
+.paper-manager-library-table[data-pinned-right-shadow]
+	.paper-manager-pinned-right {
+	box-shadow:
+		-1px 0 0 var(--background-modifier-border),
+		-8px 0 14px -14px var(--text-normal);
+}
+
+.paper-manager-library-table tbody tr:hover > .paper-manager-pinned-left,
+.paper-manager-library-table tbody tr:hover > .paper-manager-pinned-right {
+	background-color: var(--background-secondary);
+}
+
+.paper-manager-tag-cell-trigger {
+	appearance: none;
+	display: block;
+	width: 100%;
+	margin: 0;
+	padding: 2px 0;
+	overflow: hidden;
+	font: inherit;
+	line-height: inherit;
+	color: var(--text-muted);
+	text-align: left;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	cursor: text;
+	background-color: transparent !important;
+	background-image: none !important;
+	border: 0;
+	border-radius: 0;
+	box-shadow: none !important;
+}
+
+.paper-manager-tag-cell-trigger:hover {
+	color: var(--text-normal);
+}
+
+.paper-manager-tag-cell-trigger:focus-visible {
+	color: var(--text-normal);
+	outline: 2px solid var(--interactive-accent);
+	outline-offset: 2px;
+}
+
+.paper-manager-tag-editor {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 4px;
+	width: 100%;
+	min-height: 34px;
+	padding: 4px 5px;
+	background-color: var(--background-primary);
+	border: 1px solid var(--interactive-accent);
+	border-radius: var(--radius-s);
+	box-shadow: 0 0 0 1px var(--interactive-accent);
+}
+
+.paper-manager-tag-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 3px;
+	max-width: 100%;
+	min-height: 24px;
+	padding: 2px 4px 2px 7px;
+	font-size: var(--font-ui-smaller);
+	line-height: 1.2;
+	color: var(--text-normal);
+	white-space: nowrap;
+	background-color: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 999px;
+}
+
+.paper-manager-tag-chip > span {
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.paper-manager-tag-chip > button {
+	appearance: none;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 16px;
+	height: 16px;
+	margin: 0;
+	padding: 0;
+	color: var(--text-faint);
+	cursor: pointer;
+	background-color: transparent !important;
+	background-image: none !important;
+	border: 0;
+	border-radius: 999px;
+	box-shadow: none !important;
+}
+
+.paper-manager-tag-chip > button:hover {
+	color: var(--text-normal);
+	background-color: var(--background-modifier-hover) !important;
+}
+
+.paper-manager-tag-chip > button > svg {
+	width: 12px;
+	height: 12px;
+}
+
+.paper-manager-tag-editor > input {
+	appearance: none;
+	flex: 1 1 100px;
+	min-width: 100px;
+	height: 24px;
+	margin: 0;
+	padding: 2px 3px;
+	font: inherit;
+	font-size: var(--font-ui-small);
+	color: var(--text-normal);
+	background-color: transparent !important;
+	background-image: none !important;
+	border: 0;
+	border-radius: 0;
+	box-shadow: none !important;
+}
+
+.paper-manager-tag-editor > input:focus {
+	outline: none;
+}
+
+.paper-manager-filter-header {
+	appearance: none;
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	max-width: 100%;
+	margin: 0;
+	padding: 2px 0;
+	font: inherit;
+	font-weight: var(--font-medium);
+	line-height: 1;
+	color: var(--text-muted);
+	cursor: pointer;
+	background-color: transparent !important;
+	background-image: none !important;
+	border: 0;
+	border-radius: 0;
+	box-shadow: none !important;
+}
+
+.paper-manager-filter-header:hover,
+.paper-manager-filter-header[data-active] {
+	color: var(--text-accent);
+}
+
+.paper-manager-filter-header:focus-visible {
+	outline: 2px solid var(--interactive-accent);
+	outline-offset: 2px;
+}
+
+.paper-manager-filter-header > svg {
+	width: 13px;
+	height: 13px;
+}
+
+.paper-manager-filter-header-count {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 17px;
+	height: 17px;
+	padding: 0 4px;
+	font-size: 10px;
+	font-weight: var(--font-semibold);
+	line-height: 1;
+	color: var(--text-on-accent);
+	background-color: var(--interactive-accent);
+	border-radius: 999px;
+}
+
+.paper-manager-column-filter-menu {
+	position: fixed;
+	z-index: var(--layer-menu, 1000);
+	display: flex;
+	flex-direction: column;
+	box-sizing: border-box;
+	width: 260px;
+	max-height: 340px;
+	padding: 6px;
+	font-family: var(--font-interface);
+	color: var(--text-normal);
+	background-color: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-l);
+	box-shadow: var(--shadow-l);
+}
+
+.paper-manager-column-filter-heading {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	min-height: 30px;
+	padding: 0 5px 4px;
+	font-size: var(--font-ui-small);
+	font-weight: var(--font-semibold);
+}
+
+.paper-manager-column-filter-heading > button {
+	appearance: none;
+	margin: 0;
+	padding: 3px 5px;
+	font: inherit;
+	font-size: var(--font-ui-smaller);
+	font-weight: var(--font-normal);
+	color: var(--text-accent);
+	cursor: pointer;
+	background-color: transparent !important;
+	background-image: none !important;
+	border: 0;
+	box-shadow: none !important;
+}
+
+.paper-manager-column-filter-heading > button:disabled {
+	color: var(--text-faint);
+	cursor: default;
+}
+
+.paper-manager-column-filter-search {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	min-height: 32px;
+	margin-bottom: 5px;
+	padding: 0 8px;
+	background-color: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+}
+
+.paper-manager-column-filter-search:focus-within {
+	border-color: var(--interactive-accent);
+	box-shadow: 0 0 0 1px var(--interactive-accent);
+}
+
+.paper-manager-column-filter-search > svg {
+	flex: 0 0 auto;
+	width: 14px;
+	height: 14px;
+	color: var(--text-muted);
+}
+
+.paper-manager-column-filter-search > input {
+	appearance: none;
+	min-width: 0;
+	width: 100%;
+	height: 30px;
+	margin: 0;
+	padding: 0;
+	font: inherit;
+	font-size: var(--font-ui-small);
+	color: var(--text-normal);
+	background-color: transparent !important;
+	background-image: none !important;
+	border: 0;
+	box-shadow: none !important;
+}
+
+.paper-manager-column-filter-search > input:focus {
+	outline: none;
+}
+
+.paper-manager-column-filter-options {
+	min-height: 0;
+	overflow-y: auto;
+}
+
+.paper-manager-column-filter-option {
+	appearance: none;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	width: 100%;
+	min-height: 32px;
+	margin: 0;
+	padding: 4px 7px;
+	font: inherit;
+	font-size: var(--font-ui-small);
+	line-height: 1.25;
+	color: var(--text-normal);
+	text-align: left;
+	cursor: pointer;
+	background-color: transparent !important;
+	background-image: none !important;
+	border: 0;
+	border-radius: var(--radius-s);
+	box-shadow: none !important;
+}
+
+.paper-manager-column-filter-option:hover,
+.paper-manager-column-filter-option:focus-visible {
+	background-color: var(--background-modifier-hover) !important;
+}
+
+.paper-manager-column-filter-option:focus-visible {
+	outline: 2px solid var(--interactive-accent);
+	outline-offset: -2px;
+}
+
+.paper-manager-column-filter-check {
+	display: inline-flex;
+	flex: 0 0 auto;
+	align-items: center;
+	justify-content: center;
+	width: 16px;
+	height: 16px;
+	color: var(--text-on-accent);
+	background-color: transparent;
+	border: 1px solid var(--background-modifier-border-hover);
+	border-radius: 4px;
+}
+
+.paper-manager-column-filter-option[data-selected]
+	.paper-manager-column-filter-check {
+	background-color: var(--interactive-accent);
+	border-color: var(--interactive-accent);
+}
+
+.paper-manager-column-filter-check > svg {
+	width: 12px;
+	height: 12px;
+}
+
+.paper-manager-column-filter-label {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.paper-manager-column-filter-count {
+	flex: 0 0 auto;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+}
+
+.paper-manager-column-filter-empty {
+	margin: 0;
+	padding: 18px 8px;
+	font-size: var(--font-ui-small);
+	color: var(--text-muted);
+	text-align: center;
+}
+
+.paper-manager-status-trigger {
+	appearance: none;
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	min-height: 26px;
+	padding: 3px 7px;
+	font: inherit;
+	font-size: var(--font-ui-smaller);
+	font-weight: var(--font-medium);
+	line-height: 1;
+	color: var(--text-normal);
+	cursor: pointer;
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 999px;
+	box-shadow: none;
+	transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.paper-manager-status-trigger:hover,
+.paper-manager-status-trigger[data-open] {
+	background: var(--background-modifier-hover);
+	border-color: var(--background-modifier-border-hover);
+}
+
+.paper-manager-status-trigger:focus-visible {
+	outline: 2px solid var(--interactive-accent);
+	outline-offset: 2px;
+}
+
+.paper-manager-status-trigger > svg {
+	width: 13px;
+	height: 13px;
+	color: var(--text-muted);
+	transition: transform 120ms ease;
+}
+
+.paper-manager-status-trigger[data-open] > svg {
+	transform: rotate(180deg);
+}
+
+.paper-manager-status-menu {
+	position: fixed;
+	z-index: var(--layer-menu, 1000);
+	box-sizing: border-box;
+	width: 180px;
+	padding: 5px;
+	font-family: var(--font-interface);
+	color: var(--text-normal);
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-l);
+	box-shadow: var(--shadow-l);
+}
+
+.paper-manager-status-menu .paper-manager-status-option {
+	appearance: none;
+	display: flex;
+	align-items: center;
+	gap: 9px;
+	width: 100%;
+	height: 34px;
+	margin: 0;
+	padding: 0 9px;
+	font: inherit;
+	font-size: var(--font-ui-small);
+	font-weight: var(--font-normal);
+	line-height: 1;
+	color: var(--text-normal);
+	text-align: left;
+	cursor: pointer;
+	background-color: transparent !important;
+	background-image: none !important;
+	border: 0;
+	border-radius: var(--radius-s);
+	box-shadow: none;
+}
+
+.paper-manager-status-menu .paper-manager-status-option:hover,
+.paper-manager-status-menu .paper-manager-status-option:focus-visible {
+	background-color: var(--background-modifier-hover) !important;
+}
+
+.paper-manager-status-menu .paper-manager-status-option:focus-visible {
+	outline: 2px solid var(--interactive-accent);
+	outline-offset: -2px;
+}
+
+.paper-manager-status-dot {
+	flex: 0 0 auto;
+	width: 8px;
+	height: 8px;
+	background: var(--text-faint);
+	border-radius: 999px;
+}
+
+[data-status="reading"] > .paper-manager-status-dot {
+	background: var(--interactive-accent);
+}
+
+[data-status="finished"] > .paper-manager-status-dot {
+	background: var(--color-green, #2d9d78);
+}
+
+.paper-manager-status-label {
+	flex: 1;
+}
+
+.paper-manager-status-check {
+	flex: 0 0 auto;
+	width: 15px;
+	height: 15px;
+	color: var(--interactive-accent);
+}
+
 .paper-manager-inline-pdf {
 	position: relative;
 }

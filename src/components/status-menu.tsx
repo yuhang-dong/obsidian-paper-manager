@@ -18,9 +18,10 @@ interface StatusMenuProps {
 	onClose: () => void;
 }
 
-const MENU_WIDTH = 168;
-const MENU_MAX_HEIGHT = 180;
-const MENU_MARGIN = 4;
+const MENU_WIDTH = 180;
+const MENU_HEIGHT = 116;
+const MENU_GAP = 6;
+const VIEWPORT_MARGIN = 8;
 
 export function StatusMenu({
 	anchor,
@@ -36,18 +37,24 @@ export function StatusMenu({
 
 	function updatePosition(): void {
 		const rect = anchor.getBoundingClientRect();
+		const fitsBelow =
+			rect.bottom + MENU_GAP + MENU_HEIGHT <=
+			window.innerHeight - VIEWPORT_MARGIN;
+		const preferredTop = fitsBelow
+			? rect.bottom + MENU_GAP
+			: rect.top - MENU_GAP - MENU_HEIGHT;
 		const top = Math.max(
-			MENU_MARGIN,
+			VIEWPORT_MARGIN,
 			Math.min(
-				rect.bottom + MENU_MARGIN,
-				window.innerHeight - MENU_MARGIN - MENU_MAX_HEIGHT,
+				preferredTop,
+				window.innerHeight - VIEWPORT_MARGIN - MENU_HEIGHT,
 			),
 		);
 		const left = Math.max(
-			MENU_MARGIN,
+			VIEWPORT_MARGIN,
 			Math.min(
 				rect.left,
-				window.innerWidth - MENU_WIDTH - MENU_MARGIN,
+				window.innerWidth - MENU_WIDTH - VIEWPORT_MARGIN,
 			),
 		);
 		setPosition({ top, left });
@@ -70,7 +77,7 @@ export function StatusMenu({
 	useEffect(() => {
 		const onPointerDown = (event: PointerEvent) => {
 			const target = event.target as Node;
-			if (!panelRef.current?.contains(target) && target !== anchor) {
+			if (!panelRef.current?.contains(target) && !anchor.contains(target)) {
 				onClose();
 			}
 		};
@@ -95,22 +102,34 @@ export function StatusMenu({
 	return createPortal(
 		<div
 			ref={panelRef}
-			className="fixed z-50 w-42 overflow-hidden rounded-lg border border-border bg-card py-1 text-foreground shadow-lg"
+			className="paper-manager-status-menu"
 			style={{ top: position.top, left: position.left }}
+			role="menu"
+			aria-label="Reading status"
 		>
-			{PAPER_STATUS_ORDER.map((status) => (
-				<button
-					key={status}
-					type="button"
-					className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-accent"
-					onClick={() => onSelect(status)}
-				>
-					<span className="flex-1">{humanizeStatus(status)}</span>
-					{status === currentStatus ? (
-						<Check className="size-3.5 text-primary" />
-					) : null}
-				</button>
-			))}
+			{PAPER_STATUS_ORDER.map((status) => {
+				const isSelected = status === currentStatus;
+				return (
+					<button
+						key={status}
+						type="button"
+						className="paper-manager-status-option"
+						data-status={status}
+						data-selected={isSelected || undefined}
+						role="menuitemradio"
+						aria-checked={isSelected}
+						onClick={() => onSelect(status)}
+					>
+						<span className="paper-manager-status-dot" aria-hidden="true" />
+						<span className="paper-manager-status-label">
+							{humanizeStatus(status)}
+						</span>
+						{isSelected ? (
+							<Check className="paper-manager-status-check" aria-hidden="true" />
+						) : null}
+					</button>
+				);
+			})}
 		</div>,
 		document.body,
 	);

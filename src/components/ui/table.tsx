@@ -1,9 +1,28 @@
-import type { ComponentProps } from 'react';
+import type {
+	ComponentProps,
+	Ref,
+	UIEventHandler,
+} from 'react';
 import { cn } from '@/lib/utils';
 
-export function Table({ className, ...props }: ComponentProps<'table'>) {
+interface TableProps extends ComponentProps<'table'> {
+	containerRef?: Ref<HTMLDivElement>;
+	onContainerScroll?: UIEventHandler<HTMLDivElement>;
+}
+
+export function Table({
+	className,
+	containerRef,
+	onContainerScroll,
+	...props
+}: TableProps) {
 	return (
-		<div data-slot="table-container" className="relative w-full overflow-x-auto">
+		<div
+			ref={containerRef}
+			data-slot="table-container"
+			className="relative w-full overflow-x-auto"
+			onScroll={onContainerScroll}
+		>
 			<table
 				data-slot="table"
 				className={cn('w-full caption-bottom text-sm', className)}

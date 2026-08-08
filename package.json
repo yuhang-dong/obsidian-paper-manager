@@ -1,6 +1,6 @@
 {
 	"name": "paper-manager",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"description": "An Obsidian plugin for managing and synthesizing academic papers.",
 	"main": "main.js",
 	"type": "module",

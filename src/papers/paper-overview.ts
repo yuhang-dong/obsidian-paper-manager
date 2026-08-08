@@ -11,6 +11,10 @@ const OVERVIEW_GROUP_HEADINGS: Record<'research' | 'evaluation', string> = {
 
 export function buildOverviewMarkdown(analysis: PaperAiProperties): string {
 	const lines: string[] = ['## Overview', ''];
+	const abstract = analysis.abstract.trim();
+	if (abstract) {
+		lines.push('### Abstract', '', abstract, '');
+	}
 
 	for (const group of ['research', 'evaluation'] as const) {
 		const sections: string[] = [];
