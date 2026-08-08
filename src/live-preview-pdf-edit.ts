@@ -7,6 +7,7 @@ import {
 	setIcon,
 	TFile,
 } from 'obsidian';
+import { getManagedPaperSourcePdf } from './papers/paper-reader-storage';
 
 const LIVE_PREVIEW_PDF_SELECTOR = '.pdf-embed[src], .pdf-embed[data-href]';
 const EDIT_BUTTON_CLASS = 'paper-manager-inline-pdf-edit';
@@ -22,6 +23,7 @@ export function createLivePreviewPdfEditExtension(
 
 class LivePreviewPdfEditPlugin {
 	private readonly buttons = new Set<HTMLButtonElement>();
+	private readonly pendingEmbeds = new WeakSet<HTMLElement>();
 	private readonly observer: MutationObserver;
 
 	constructor(
@@ -67,13 +69,33 @@ class LivePreviewPdfEditPlugin {
 			this.view.dom.querySelectorAll<HTMLElement>(LIVE_PREVIEW_PDF_SELECTOR),
 		);
 		for (const embed of embeds) {
-			if (embed.querySelector(`.${EDIT_BUTTON_CLASS}`)) {
-				continue;
-			}
+			void this.enhancePdfEmbed(embed, sourceFile.path);
+		}
+	}
 
-			const file = this.resolvePdfFile(embed, sourceFile.path);
-			if (!file) {
-				continue;
+	private async enhancePdfEmbed(
+		embed: HTMLElement,
+		sourcePath: string,
+	): Promise<void> {
+		if (
+			embed.querySelector(`.${EDIT_BUTTON_CLASS}`) ||
+			this.pendingEmbeds.has(embed)
+		) {
+			return;
+		}
+
+		const file = this.resolvePdfFile(embed, sourcePath);
+		if (!file) {
+			return;
+		}
+
+		this.pendingEmbeds.add(embed);
+		try {
+			if (!(await getManagedPaperSourcePdf(this.app, file))) {
+				return;
+			}
+			if (!embed.isConnected || embed.querySelector(`.${EDIT_BUTTON_CLASS}`)) {
+				return;
 			}
 
 			const button = embed.createEl('button', {
@@ -95,6 +117,8 @@ class LivePreviewPdfEditPlugin {
 
 			embed.addClass('paper-manager-inline-pdf');
 			this.buttons.add(button);
+		} finally {
+			this.pendingEmbeds.delete(embed);
 		}
 	}
 

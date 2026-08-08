@@ -1,8 +1,10 @@
 import {
 	App,
+	type EventRef,
 	getFrontMatterInfo,
 	normalizePath,
 	parseYaml,
+	type TAbstractFile,
 	TFile,
 	TFolder,
 } from 'obsidian';
@@ -75,6 +77,54 @@ export class PaperLibraryRepository {
 					left.title.localeCompare(right.title)
 				);
 			});
+	}
+
+	subscribeToLibraryChanges(onChange: () => void): () => void {
+		let refreshTimer: number | null = null;
+		const isLibraryPath = (path: string): boolean => {
+			const libraryFolder = this.libraryFolder;
+			return path === libraryFolder || path.startsWith(`${libraryFolder}/`);
+		};
+		const scheduleRefresh = (
+			file: TAbstractFile,
+			previousPath?: string,
+		): void => {
+			if (
+				!isLibraryPath(file.path) &&
+				!(previousPath && isLibraryPath(previousPath))
+			) {
+				return;
+			}
+			if (refreshTimer !== null) {
+				window.clearTimeout(refreshTimer);
+			}
+			refreshTimer = window.setTimeout(() => {
+				refreshTimer = null;
+				onChange();
+			}, 250);
+		};
+
+		const vaultEventRefs: EventRef[] = [
+			this.app.vault.on('create', (file) => scheduleRefresh(file)),
+			this.app.vault.on('modify', (file) => scheduleRefresh(file)),
+			this.app.vault.on('delete', (file) => scheduleRefresh(file)),
+			this.app.vault.on('rename', (file, previousPath) =>
+				scheduleRefresh(file, previousPath),
+			),
+		];
+		const metadataEventRef = this.app.metadataCache.on('changed', (file) =>
+			scheduleRefresh(file),
+		);
+
+		return () => {
+			if (refreshTimer !== null) {
+				window.clearTimeout(refreshTimer);
+			}
+			for (const eventRef of vaultEventRefs) {
+				this.app.vault.offref(eventRef);
+			}
+			this.app.metadataCache.offref(metadataEventRef);
+		};
 	}
 
 	async importPapers(files: File[]): Promise<PaperImportResult> {

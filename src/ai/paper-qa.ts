@@ -13,6 +13,7 @@ import {
 	PAPER_MANAGER_CHAT_MODEL,
 } from './config';
 import { obsidianFetch } from './obsidian-fetch';
+import { assertAiPdfPageLimit } from './pdf-limits';
 
 export const QA_BOT_NAME = 'PP';
 export const MAX_QA_TURNS = 10;
@@ -140,6 +141,7 @@ export interface AnswerQuestionOptions {
 	billingKey: string;
 	pdfDataUrl: string;
 	pdfFilename: string;
+	pageCount: number;
 	thread: QaTurn[];
 	newQuestion: string;
 	/** Optional highlighted/selected text from the PDF (with page hint). */
@@ -155,10 +157,12 @@ export async function answerPaperQuestion({
 	billingKey,
 	pdfDataUrl,
 	pdfFilename,
+	pageCount,
 	thread,
 	newQuestion,
 	context,
 }: AnswerQuestionOptions): Promise<AnswerQuestionResult> {
+	assertAiPdfPageLimit(pageCount);
 	const usage = await startPaperManagerUsage({
 		key: billingKey,
 		requestId: crypto.randomUUID(),

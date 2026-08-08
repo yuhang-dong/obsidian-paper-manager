@@ -20,6 +20,8 @@ import {
 	type PaperAiProperties,
 } from '@/papers/paper-property-schema';
 import type { PaperRecord } from '@/papers/types';
+import { countPdfPages } from '@/papers/pdf-page-count';
+import { assertAiPdfPageLimit } from './pdf-limits';
 
 const SAVE_ANALYSIS_TOOL_NAME = 'savePaperAnalysis';
 
@@ -103,6 +105,8 @@ export async function analyzePaper({
 }: AnalyzePaperOptions): Promise<AnalyzePaperResult> {
 	onProgress?.('reading_pdf');
 	const pdfData = await repository.readSourcePdf(paper);
+	const pageCount = await countPdfPages(pdfData);
+	assertAiPdfPageLimit(pageCount);
 	const pdfDataUrl = await arrayBufferToDataUrl(pdfData, 'application/pdf');
 
 	onProgress?.('reserving_credits');

@@ -1,7 +1,16 @@
 {
 	"name": "paper-manager",
-	"version": "0.1.1",
+	"version": "0.1.2",
 	"description": "An Obsidian plugin for managing and synthesizing academic papers.",
+	"author": "yuhang-dong",
+	"homepage": "https://github.com/yuhang-dong/obsidian-paper-manager#readme",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/yuhang-dong/obsidian-paper-manager.git"
+	},
+	"bugs": {
+		"url": "https://github.com/yuhang-dong/obsidian-paper-manager/issues"
+	},
 	"main": "main.js",
 	"type": "module",
 	"scripts": {
@@ -21,7 +30,7 @@
 		"academic-papers",
 		"pdf"
 	],
-	"license": "UNLICENSED",
+	"license": "PolyForm-Noncommercial-1.0.0",
 	"devDependencies": {
 		"@codemirror/state": "^6.5.0",
 		"@codemirror/view": "^6.38.6",
@@ -45,6 +54,7 @@
 	},
 	"dependencies": {
 		"@embedpdf/core": "^2.14.4",
+		"@embedpdf/engines": "^2.14.4",
 		"@embedpdf/plugin-annotation": "^2.14.4",
 		"@embedpdf/plugin-document-manager": "^2.14.4",
 		"@embedpdf/plugin-export": "^2.14.4",

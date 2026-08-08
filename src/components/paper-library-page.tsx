@@ -150,27 +150,33 @@ export function PaperLibraryPage({
 
 	useEffect(() => {
 		let cancelled = false;
-
-		void repository
-			.listPapers()
-			.then((loadedPapers) => {
-				if (!cancelled) {
+		let refreshVersion = 0;
+		const refreshPapers = async (): Promise<void> => {
+			const version = ++refreshVersion;
+			try {
+				const loadedPapers = await repository.listPapers();
+				if (!cancelled && version === refreshVersion) {
 					setPapers(loadedPapers);
 				}
-			})
-			.catch((error: unknown) => {
-				if (!cancelled) {
+			} catch (error) {
+				if (!cancelled && version === refreshVersion) {
 					new Notice(`Could not load paper library: ${errorMessage(error)}`);
 				}
-			})
-			.finally(() => {
-				if (!cancelled) {
+			} finally {
+				if (!cancelled && version === refreshVersion) {
 					setIsLoading(false);
 				}
-			});
+			}
+		};
+
+		const unsubscribe = repository.subscribeToLibraryChanges(() => {
+			void refreshPapers();
+		});
+		void refreshPapers();
 
 		return () => {
 			cancelled = true;
+			unsubscribe();
 		};
 	}, [repository]);
 

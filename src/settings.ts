@@ -39,7 +39,7 @@ export class PaperManagerSettingTab extends PluginSettingTab {
 			},
 			{
 				name: 'Billing key',
-				desc: 'Billing key for this plugin (for example, paper_manager_xxx). Stored in the Obsidian plugin settings file and not encrypted.',
+				desc: 'Billing key for this plugin (for example, paper_manager_xxx). Analyze and @pp send the source PDF and your prompt to editable.artifact-kit.com for AI processing. The key is stored in the Obsidian plugin settings file and is not encrypted.',
 				render: (setting) => {
 					setting.addText((text) => {
 						text.inputEl.type = 'password';
@@ -104,7 +104,7 @@ export class PaperManagerSettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName('Billing key')
 			.setDesc(
-				'Billing key for this plugin (for example, paper_manager_xxx). Stored in the Obsidian plugin settings file and not encrypted.',
+				'Billing key for this plugin (for example, paper_manager_xxx). Analyze and @pp send the source PDF and your prompt to editable.artifact-kit.com for AI processing. The key is stored in the Obsidian plugin settings file and is not encrypted.',
 			)
 			.addText((text) => {
 				text.inputEl.type = 'password';

@@ -1,10 +1,55 @@
 import type { AnnotationTransferItem } from '@embedpdf/plugin-annotation';
-import { App, normalizePath, TFile } from 'obsidian';
+import {
+	App,
+	getFrontMatterInfo,
+	normalizePath,
+	parseYaml,
+	TFile,
+} from 'obsidian';
 
 const INDEX_FILENAME = 'index.md';
 const SOURCE_PDF_FILENAME = 'source.pdf';
 const ANNOTATED_PDF_FILENAME = 'annotated.pdf';
 const ANNOTATIONS_FILENAME = 'annotations.json';
+
+export async function getManagedPaperSourcePdf(
+	app: App,
+	file: TFile,
+): Promise<TFile | null> {
+	if (
+		file.name !== SOURCE_PDF_FILENAME &&
+		file.name !== ANNOTATED_PDF_FILENAME
+	) {
+		return null;
+	}
+
+	const storage = new PaperReaderStorage(app, file.path);
+	const indexFile = app.vault.getAbstractFileByPath(storage.indexPath);
+	const sourceFile = app.vault.getAbstractFileByPath(storage.sourcePdfPath);
+	if (!(indexFile instanceof TFile) || !(sourceFile instanceof TFile)) {
+		return null;
+	}
+
+	const cachedFrontmatter = app.metadataCache.getFileCache(indexFile)?.frontmatter;
+	if (cachedFrontmatter) {
+		return cachedFrontmatter.paper_manager === true ? sourceFile : null;
+	}
+
+	try {
+		const content = await app.vault.cachedRead(indexFile);
+		const info = getFrontMatterInfo(content);
+		if (!info.exists) {
+			return null;
+		}
+
+		const frontmatter = parseYaml(info.frontmatter) as unknown;
+		return isRecord(frontmatter) && frontmatter.paper_manager === true
+			? sourceFile
+			: null;
+	} catch {
+		return null;
+	}
+}
 
 interface AnnotationFile {
 	schemaVersion: number;
@@ -149,4 +194,8 @@ function dateReviver(key: string, value: unknown): unknown {
 	}
 
 	return value;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

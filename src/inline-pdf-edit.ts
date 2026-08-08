@@ -5,6 +5,7 @@ import {
 	setIcon,
 	TFile,
 } from 'obsidian';
+import { getManagedPaperSourcePdf } from './papers/paper-reader-storage';
 
 const INLINE_PDF_SELECTOR = '.internal-embed[src], .internal-embed[data-href]';
 const EDIT_BUTTON_CLASS = 'paper-manager-inline-pdf-edit';
@@ -22,6 +23,7 @@ export function addInlinePdfEditButtons(
 
 class InlinePdfEditChild extends MarkdownRenderChild {
 	private readonly buttons = new Set<HTMLButtonElement>();
+	private readonly pendingEmbeds = new WeakSet<HTMLElement>();
 	private observer: MutationObserver | null = null;
 
 	constructor(
@@ -59,13 +61,30 @@ class InlinePdfEditChild extends MarkdownRenderChild {
 	private enhancePdfEmbeds(): void {
 		const embeds = this.getCandidateEmbeds();
 		for (const embed of embeds) {
-			if (embed.querySelector(`.${EDIT_BUTTON_CLASS}`)) {
-				continue;
-			}
+			void this.enhancePdfEmbed(embed);
+		}
+	}
 
-			const file = this.resolvePdfFile(embed);
-			if (!file) {
-				continue;
+	private async enhancePdfEmbed(embed: HTMLElement): Promise<void> {
+		if (
+			embed.querySelector(`.${EDIT_BUTTON_CLASS}`) ||
+			this.pendingEmbeds.has(embed)
+		) {
+			return;
+		}
+
+		const file = this.resolvePdfFile(embed);
+		if (!file) {
+			return;
+		}
+
+		this.pendingEmbeds.add(embed);
+		try {
+			if (!(await getManagedPaperSourcePdf(this.app, file))) {
+				return;
+			}
+			if (!embed.isConnected || embed.querySelector(`.${EDIT_BUTTON_CLASS}`)) {
+				return;
 			}
 
 			const button = embed.createEl('button', {
@@ -83,6 +102,8 @@ class InlinePdfEditChild extends MarkdownRenderChild {
 
 			embed.addClass('paper-manager-inline-pdf');
 			this.buttons.add(button);
+		} finally {
+			this.pendingEmbeds.delete(embed);
 		}
 	}
 

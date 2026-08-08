@@ -36,6 +36,7 @@ import {
 	getUnansweredQuestion,
 	QA_BOT_NAME,
 } from '@/ai/paper-qa';
+import { assertAiPdfPageLimit } from '@/ai/pdf-limits';
 
 const HIDDEN_VIEWER_CATEGORIES = [
 	'document-menu',
@@ -54,6 +55,8 @@ const HIDDEN_VIEWER_CATEGORIES = [
 	'insert-rubber-stamp',
 	'insert-signature',
 ];
+
+const AUTO_SAVE_DEBOUNCE_MS = 800;
 
 interface PaperReaderPageProps {
 	app: App;
@@ -197,28 +200,41 @@ export function PaperReaderPage({
 		let loadedDocumentId: string | null = null;
 		let saveRunning = false;
 		let saveRequested = false;
+		let saveTimer: number | null = null;
 		const initialImportIds = new Set<string>();
 
 		const flushAutoSave = async () => {
-			if (saveRunning) {
+			if (saveRunning || !saveRequested) {
 				return;
 			}
 
 			saveRunning = true;
+			saveRequested = false;
 			try {
-				do {
-					saveRequested = false;
-					try {
-						await savePaper(registry, storage);
-					} catch (error) {
-						if (!disposed) {
-							new Notice(`自动保存失败：${errorMessage(error)}`);
-						}
+				try {
+					await savePaper(registry, storage);
+				} catch (error) {
+					if (!disposed) {
+						new Notice(`自动保存失败：${errorMessage(error)}`);
 					}
-				} while (saveRequested && !disposed);
+				}
 			} finally {
 				saveRunning = false;
+				if (saveRequested && !disposed) {
+					scheduleAutoSave();
+				}
 			}
+		};
+
+		const scheduleAutoSave = () => {
+			saveRequested = true;
+			if (saveTimer !== null) {
+				window.clearTimeout(saveTimer);
+			}
+			saveTimer = window.setTimeout(() => {
+				saveTimer = null;
+				void flushAutoSave();
+			}, AUTO_SAVE_DEBOUNCE_MS);
 		};
 
 		const getPdfDataUrl = async (): Promise<string> => {
@@ -328,16 +344,17 @@ export function PaperReaderPage({
 						const document = documentApi.getDocument(
 							pending.documentId,
 						);
-						const selectedText = document
-							? await extractAnnotationText(
-									engine,
-									document,
-									pending.pageIndex,
-									rootAnnotation?.object.rect ??
-										tracked.object.rect,
-									pageTextRunsCacheRef.current,
-								)
-							: '';
+						if (!document) {
+							throw new Error('PDF 文件尚未准备好');
+						}
+						assertAiPdfPageLimit(document.pageCount);
+						const selectedText = await extractAnnotationText(
+							engine,
+							document,
+							pending.pageIndex,
+							rootAnnotation?.object.rect ?? tracked.object.rect,
+							pageTextRunsCacheRef.current,
+						);
 						const context = selectedText
 							? `用户选中了论文第 ${pending.pageIndex + 1} 页中的这段文字：\n${selectedText}`
 							: undefined;
@@ -351,6 +368,7 @@ export function PaperReaderPage({
 							pdfDataUrl,
 							pdfFilename:
 								pdfPath.split('/').pop() ?? 'paper.pdf',
+							pageCount: document.pageCount,
 							thread,
 							newQuestion,
 							context,
@@ -458,8 +476,7 @@ export function PaperReaderPage({
 					event.committed &&
 					!disposed
 				) {
-					saveRequested = true;
-					void flushAutoSave();
+					scheduleAutoSave();
 				}
 			},
 		);
@@ -513,6 +530,9 @@ export function PaperReaderPage({
 
 		return () => {
 			disposed = true;
+			if (saveTimer !== null) {
+				window.clearTimeout(saveTimer);
+			}
 			unsubscribeAnnotationEvents();
 			unsubscribe();
 		};

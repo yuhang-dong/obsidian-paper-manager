@@ -19,14 +19,16 @@ import {
 	PaperManagerSettings,
 	PaperManagerSettingTab,
 } from './settings';
-import { PaperReaderStorage } from './papers/paper-reader-storage';
+import { getManagedPaperSourcePdf } from './papers/paper-reader-storage';
 import { addInlinePdfEditButtons } from './inline-pdf-edit';
 import { createLivePreviewPdfEditExtension } from './live-preview-pdf-edit';
+import { destroyPdfPageCountEngine } from './papers/pdf-page-count';
 
 export default class PaperManagerPlugin extends Plugin {
 	settings!: PaperManagerSettings;
-	private readonly enhancedPdfViews = new WeakSet<ItemView>();
-	private readonly pdfViewActions = new Set<HTMLElement>();
+	private readonly pdfViewActionVersions = new WeakMap<ItemView, number>();
+	private readonly pdfViewActions = new WeakMap<ItemView, HTMLElement>();
+	private readonly pdfViewActionElements = new Set<HTMLElement>();
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
@@ -77,6 +79,11 @@ export default class PaperManagerPlugin extends Plugin {
 			this.attachActionsToPdfViews();
 		});
 		this.registerEvent(
+			this.app.workspace.on('file-open', () => {
+				this.attachActionsToPdfViews();
+			}),
+		);
+		this.registerEvent(
 			this.app.workspace.on('active-leaf-change', (leaf) => {
 				if (leaf) {
 					this.attachPaperReaderAction(leaf);
@@ -89,10 +96,11 @@ export default class PaperManagerPlugin extends Plugin {
 			}),
 		);
 		this.register(() => {
-			for (const action of this.pdfViewActions) {
+			void destroyPdfPageCountEngine();
+			for (const action of this.pdfViewActionElements) {
 				action.remove();
 			}
-			this.pdfViewActions.clear();
+			this.pdfViewActionElements.clear();
 		});
 	}
 
@@ -115,18 +123,16 @@ export default class PaperManagerPlugin extends Plugin {
 	}
 
 	async openPaperReader(file: TFile): Promise<void> {
-		const storage = new PaperReaderStorage(this.app, file.path);
-		const sourceFile = this.app.vault.getAbstractFileByPath(
-			storage.sourcePdfPath,
-		);
-		const editorFile =
-			storage.isManagedPaper() && sourceFile instanceof TFile ? sourceFile : file;
+		const sourceFile = await getManagedPaperSourcePdf(this.app, file);
+		if (!sourceFile) {
+			throw new Error('This PDF is not managed by Paper Manager');
+		}
 		const leaf = this.app.workspace.getLeaf('tab');
 		await leaf.setViewState({
 			type: PAPER_READER_VIEW_TYPE,
 			active: true,
 			state: {
-				pdfPath: editorFile.path,
+				pdfPath: sourceFile.path,
 			},
 		});
 		await this.app.workspace.revealLeaf(leaf);
@@ -152,15 +158,37 @@ export default class PaperManagerPlugin extends Plugin {
 
 	private attachPaperReaderAction(leaf: WorkspaceLeaf): void {
 		const view = leaf.view;
-		if (
-			view.getViewType() !== 'pdf' ||
-			!(view instanceof ItemView) ||
-			this.enhancedPdfViews.has(view)
-		) {
+		if (view.getViewType() !== 'pdf' || !(view instanceof ItemView)) {
+			return;
+		}
+		void this.syncPaperReaderAction(view);
+	}
+
+	private async syncPaperReaderAction(view: ItemView): Promise<void> {
+		const version = (this.pdfViewActionVersions.get(view) ?? 0) + 1;
+		this.pdfViewActionVersions.set(view, version);
+
+		const file = (view as FileView).file;
+		const sourceFile = file
+			? await getManagedPaperSourcePdf(this.app, file)
+			: null;
+		if (this.pdfViewActionVersions.get(view) !== version) {
 			return;
 		}
 
-		this.enhancedPdfViews.add(view);
+		const existingAction = this.pdfViewActions.get(view);
+		if (!sourceFile) {
+			if (existingAction) {
+				existingAction.remove();
+				this.pdfViewActions.delete(view);
+				this.pdfViewActionElements.delete(existingAction);
+			}
+			return;
+		}
+		if (existingAction) {
+			return;
+		}
+
 		const action = view.addAction(
 			'highlighter',
 			'Edit in Paper Manager',
@@ -174,7 +202,8 @@ export default class PaperManagerPlugin extends Plugin {
 			},
 		);
 		action.addClass('paper-manager-edit-pdf-action');
-		this.pdfViewActions.add(action);
+		this.pdfViewActions.set(view, action);
+		this.pdfViewActionElements.add(action);
 	}
 }
 
