@@ -12,9 +12,47 @@ export interface PaperManagerUsage {
 	remainingCredits: number;
 }
 
+export interface PaperManagerKeyStatus {
+	valid: true;
+	productType: typeof PAPER_MANAGER_PRODUCT_TYPE;
+	remainingCredits: number;
+}
+
 export interface StartPaperManagerUsageOptions {
 	key: string;
 	requestId: string;
+}
+
+export async function validatePaperManagerKey(
+	key: string,
+): Promise<PaperManagerKeyStatus> {
+	const normalizedKey = key.trim();
+	if (!normalizedKey) {
+		throw new Error('A billing key is required');
+	}
+
+	const response = await requestUrl({
+		url: `${AI_WORKER_BASE_URL}/api/keys/validate`,
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json',
+		},
+		body: JSON.stringify({
+			key: normalizedKey,
+			productType: PAPER_MANAGER_PRODUCT_TYPE,
+		}),
+		throw: false,
+	});
+	const payload = parseJson(response.text);
+
+	if (response.status < 200 || response.status >= 300) {
+		throw new Error(billingErrorMessage(payload, response.status));
+	}
+	if (!isPaperManagerKeyStatus(payload)) {
+		throw new Error('Billing service returned an invalid key response');
+	}
+
+	return payload;
 }
 
 export async function startPaperManagerUsage({
@@ -78,6 +116,20 @@ function isPaperManagerUsage(value: unknown): value is PaperManagerUsage {
 		isNonEmptyString(value.usageToken) &&
 		value.productType === PAPER_MANAGER_PRODUCT_TYPE &&
 		isFiniteNumber(value.creditsCharged) &&
+		isFiniteNumber(value.remainingCredits)
+	);
+}
+
+function isPaperManagerKeyStatus(
+	value: unknown,
+): value is PaperManagerKeyStatus {
+	if (!isRecord(value)) {
+		return false;
+	}
+
+	return (
+		value.valid === true &&
+		value.productType === PAPER_MANAGER_PRODUCT_TYPE &&
 		isFiniteNumber(value.remainingCredits)
 	);
 }
