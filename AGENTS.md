@@ -124,20 +124,25 @@ explicit Refresh action. Validate the response shape, handle stale concurrent
 requests, and never log or display the complete key.
 
 AI analysis and `@pp` support PDFs with at most 30 pages. Count pages locally
-and reject larger PDFs before starting billable usage or constructing/uploading
-the PDF data URL. Larger PDFs must remain fully usable for free local import,
-organization, reading, and annotation.
+and reject larger PDFs before starting billable usage or extracting/constructing
+the AI request payload. Larger PDFs must remain fully usable for free local
+import, organization, reading, and annotation.
 
 AI jobs update `ai_status`, `ai_schema_version`, `ai_model`, `ai_updated_at`, and
 `ai_error` in `index.md`. Validate the structured response before applying all
 result fields through the repository's single frontmatter update operation.
-Analyze the immutable `source.pdf`, send it as an `application/pdf` file part,
-and force one `savePaperAnalysis` client-tool call. Validate the tool input with
-Zod before writing any extracted fields. Use Obsidian's `requestUrl` through a
-Fetch-compatible adapter so calls do not depend on renderer CORS permissions;
-the adapter buffers the HTTP response before the AI SDK decodes its UI-message
-stream, so this workflow should be presented as staged progress rather than
-token-by-token streaming.
+Analyze the immutable `source.pdf` by extracting its embedded text locally with
+PDFium one page at a time. Preserve `--- Page N ---` markers and send the full
+extracted text instead of an `application/pdf` file part; do not clean up column
+order, repeated headers/footers, or references. Force one `savePaperAnalysis`
+client-tool call and validate the tool input with Zod before writing any
+extracted fields. `@pp` reuses the open viewer document to extract and cache the
+same page-marked PDFium text locally, and sends that text with the question,
+recent thread history, and selected annotation text instead of the PDF file.
+Use Obsidian's `requestUrl` through a Fetch-compatible adapter so calls do not
+depend on renderer CORS permissions; the adapter buffers the HTTP response
+before the AI SDK decodes its UI-message stream, so this workflow should be
+presented as staged progress rather than token-by-token streaming.
 
 ## Packaging constraint
 

@@ -32,7 +32,8 @@ of the current release.
   features.
 
 PDFs over 30 pages can be imported, organized, read, and annotated locally, but
-**Analyze**, **Reanalyze**, and `@pp` will reject them before billing or upload.
+**Analyze**, **Reanalyze**, and `@pp` will reject them before billing or sending
+document content to the AI service.
 
 ## Installation
 
@@ -87,7 +88,8 @@ Papers/
 
 - `index.md` contains the paper's metadata, AI-generated overview, and your
   notes. The `paper_manager: true` property identifies a managed paper.
-- `source.pdf` is the immutable imported PDF used for reading and AI requests.
+- `source.pdf` is the immutable imported PDF used for reading and local text
+  extraction for AI requests.
 - `annotations.json` is the editable annotation source of truth.
 - `annotated.pdf` is a generated PDF with saved annotations applied.
 
@@ -109,6 +111,9 @@ A billing key is a credential for the external service at
 does not provide a separate account-creation flow inside Obsidian, and the key
 is not required for local features.
 
+Email [dong_yu_hang@126.com](mailto:dong_yu_hang@126.com) to request a free
+trial key.
+
 Credits are reserved or charged when an AI request starts, before generation
 finishes. The successful-result notice displays the amount charged and the
 remaining balance reported by the service. If a request fails after billing has
@@ -126,14 +131,17 @@ When—and only when—you explicitly select **Analyze**/**Reanalyze** or submit
 
 1. Start billable usage by sending the billing key, a random request ID, and the
    `paper_manager` product identifier.
-2. Send the complete managed `source.pdf` and request data for AI processing.
+2. Extract the PDF text locally and send that text with explicit page markers
+   plus the request data for AI processing. Analyze, Reanalyze, and `@pp` do not
+   upload the PDF file itself.
 
 For analysis, request data includes the imported filename, current library
-title, analysis instructions, and the expected output schema. For `@pp`, it
-includes the question, up to the ten most recent question-and-answer turns in
-that comment thread, and text selected near the comment when available. The
-service returns the AI result and billing information such as credits charged
-and remaining credits.
+title, locally extracted page-by-page text, analysis instructions, and the
+expected output schema. For `@pp`, it includes the locally extracted page-by-page
+text, question, up to the ten most recent question-and-answer turns in that
+comment thread, and text selected near the comment when available. The service
+returns the AI result and billing information such as credits charged and
+remaining credits.
 
 The billing key is saved unencrypted in Obsidian's plugin settings data. It is
 not written into paper notes or annotation files. Treat the key as a secret and
@@ -168,6 +176,10 @@ and run:
 ```bash
 npm run build:obsidian
 ```
+
+This also creates `.hotreload` in the deployed plugin directory. Install and
+enable Obsidian's Hot Reload plugin to reload Paper Manager after subsequent
+local deployments.
 
 For continuous local builds with the Obsidian
 [Hot Reload](https://github.com/pjeby/hot-reload) plugin, run:

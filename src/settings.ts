@@ -18,6 +18,9 @@ export const DEFAULT_SETTINGS: PaperManagerSettings = {
 	aiApiKey: '',
 };
 
+const BILLING_KEY_DESCRIPTION =
+	'Required for Analyze, Reanalyze, and @pp. Email dong_yu_hang@126.com for a free trial key.';
+
 export class PaperManagerSettingTab extends PluginSettingTab {
 	plugin: PaperManagerPlugin;
 	private creditBalanceEl: HTMLElement | null = null;
@@ -42,7 +45,7 @@ export class PaperManagerSettingTab extends PluginSettingTab {
 			},
 			{
 				name: 'Billing key',
-				desc: 'Billing key for this plugin (for example, paper_manager_xxx). Analyze and @pp send the source PDF and your prompt to editable.artifact-kit.com for AI processing. The key is stored in the Obsidian plugin settings file and is not encrypted.',
+				desc: BILLING_KEY_DESCRIPTION,
 				render: (setting) => {
 					this.addBillingKeyControl(setting);
 				},
@@ -107,9 +110,7 @@ export class PaperManagerSettingTab extends PluginSettingTab {
 
 		const billingKeySetting = new Setting(containerEl)
 			.setName('Billing key')
-			.setDesc(
-				'Billing key for this plugin (for example, paper_manager_xxx). Analyze and @pp send the source PDF and your prompt to editable.artifact-kit.com for AI processing. The key is stored in the Obsidian plugin settings file and is not encrypted.',
-			);
+			.setDesc(BILLING_KEY_DESCRIPTION);
 		this.addBillingKeyControl(billingKeySetting);
 
 		const creditBalanceSetting = new Setting(containerEl)
@@ -125,7 +126,7 @@ export class PaperManagerSettingTab extends PluginSettingTab {
 				void this.refreshCreditBalance();
 			};
 			text
-				.setPlaceholder('Billing key')
+				.setPlaceholder('Enter billing key')
 				.setValue(this.plugin.settings.aiApiKey)
 				.onChange(async (value) => {
 					this.plugin.settings.aiApiKey = value.trim();

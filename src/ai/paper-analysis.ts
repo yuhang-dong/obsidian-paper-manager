@@ -13,14 +13,26 @@ import {
 	AI_CHAT_API_ENDPOINT,
 	PAPER_MANAGER_CHAT_MODEL,
 } from './config';
-import { obsidianFetch } from './obsidian-fetch';
+import {
+	elapsedMs,
+	logAiEvent,
+	logAiFailure,
+	logAiPayload,
+} from './ai-logging';
+import {
+	AI_REQUEST_ID_HEADER,
+	obsidianFetch,
+} from './obsidian-fetch';
 import type { PaperLibraryRepository } from '@/papers/paper-library-repository';
 import {
 	type LiteratureType,
 	type PaperAiProperties,
 } from '@/papers/paper-property-schema';
 import type { PaperRecord } from '@/papers/types';
-import { countPdfPages } from '@/papers/pdf-page-count';
+import {
+	countPdfPages,
+	extractPdfText,
+} from '@/papers/pdf-page-count';
 import { assertAiPdfPageLimit } from './pdf-limits';
 
 const SAVE_ANALYSIS_TOOL_NAME = 'savePaperAnalysis';
@@ -103,50 +115,117 @@ export async function analyzePaper({
 	onProgress,
 	abortSignal,
 }: AnalyzePaperOptions): Promise<AnalyzePaperResult> {
-	onProgress?.('reading_pdf');
-	const pdfData = await repository.readSourcePdf(paper);
-	const pageCount = await countPdfPages(pdfData);
-	assertAiPdfPageLimit(pageCount);
-	const pdfDataUrl = await arrayBufferToDataUrl(pdfData, 'application/pdf');
-
-	onProgress?.('reserving_credits');
-	const usage = await startPaperManagerUsage({
-		key: billingKey,
-		requestId: crypto.randomUUID(),
+	const requestId = crypto.randomUUID();
+	const startedAt = Date.now();
+	let step = 'read_pdf';
+	logAiEvent('analysis.started', {
+		requestId,
+		paperId: paper.id,
+		model: PAPER_MANAGER_CHAT_MODEL,
 	});
 
-	onProgress?.('analyzing');
-	const analysis = await requestPaperAnalysis({
-		paper,
-		pdfDataUrl,
-		usageToken: usage.usageToken,
-		abortSignal,
-	});
+	try {
+		onProgress?.('reading_pdf');
+		logAiEvent('analysis.step.started', { requestId, step });
+		const pdfData = await repository.readSourcePdf(paper);
+		logAiEvent('analysis.step.completed', {
+			requestId,
+			step,
+			pdfBytes: pdfData.byteLength,
+		});
 
-	onProgress?.('saving');
-	let updatedPaper = await repository.updatePaperOverview(paper, analysis);
-	updatedPaper = await repository.updatePaperProperties(updatedPaper, {
-		...analysis,
-		analyzedAt: new Date().toISOString(),
-	});
+		step = 'count_pages';
+		logAiEvent('analysis.step.started', { requestId, step });
+		const pageCount = await countPdfPages(pdfData);
+		assertAiPdfPageLimit(pageCount);
+		logAiEvent('analysis.step.completed', { requestId, step, pageCount });
 
-	return { paper: updatedPaper, usage };
+		step = 'extract_pdf_text';
+		logAiEvent('analysis.step.started', { requestId, step, pageCount });
+		const pdfText = await extractPdfText(pdfData);
+		logAiEvent('analysis.step.completed', {
+			requestId,
+			step,
+			pageCount,
+			textCharacters: pdfText.length,
+		});
+
+		step = 'reserve_credits';
+		onProgress?.('reserving_credits');
+		logAiEvent('analysis.step.started', { requestId, step });
+		const usage = await startPaperManagerUsage({
+			key: billingKey,
+			requestId,
+		});
+		logAiEvent('analysis.step.completed', {
+			requestId,
+			step,
+			usageId: usage.usageId,
+			creditsCharged: usage.creditsCharged,
+			remainingCredits: usage.remainingCredits,
+		});
+
+		step = 'request_model';
+		onProgress?.('analyzing');
+		logAiEvent('analysis.step.started', { requestId, step });
+		const analysis = await requestPaperAnalysis({
+			paper,
+			pdfText,
+			usageToken: usage.usageToken,
+			requestId,
+			abortSignal,
+		});
+		logAiEvent('analysis.step.completed', { requestId, step });
+
+		step = 'save_overview';
+		onProgress?.('saving');
+		logAiEvent('analysis.step.started', { requestId, step });
+		let updatedPaper = await repository.updatePaperOverview(paper, analysis);
+		logAiEvent('analysis.step.completed', { requestId, step });
+
+		step = 'save_properties';
+		logAiEvent('analysis.step.started', { requestId, step });
+		updatedPaper = await repository.updatePaperProperties(updatedPaper, {
+			...analysis,
+			analyzedAt: new Date().toISOString(),
+		});
+		logAiEvent('analysis.completed', {
+			requestId,
+			paperId: paper.id,
+			elapsedMs: elapsedMs(startedAt),
+		});
+
+		return { paper: updatedPaper, usage };
+	} catch (error) {
+		logAiFailure('analysis.failed', error, {
+			requestId,
+			paperId: paper.id,
+			step,
+			elapsedMs: elapsedMs(startedAt),
+		});
+		throw error;
+	}
 }
 
 async function requestPaperAnalysis({
 	paper,
-	pdfDataUrl,
+	pdfText,
 	usageToken,
+	requestId,
 	abortSignal,
 }: {
 	paper: PaperRecord;
-	pdfDataUrl: string;
+	pdfText: string;
 	usageToken: string;
+	requestId: string;
 	abortSignal?: AbortSignal;
 }): Promise<PaperAiProperties> {
 	const transport = new DefaultChatTransport<UIMessage>({
 		api: AI_CHAT_API_ENDPOINT,
-		headers: createUsageTokenHeaders(usageToken),
+		headers: {
+			...createUsageTokenHeaders(usageToken),
+			[AI_REQUEST_ID_HEADER]: requestId,
+		},
 		fetch: obsidianFetch,
 		body: {
 			model: PAPER_MANAGER_CHAT_MODEL,
@@ -171,16 +250,12 @@ async function requestPaperAnalysis({
 					{
 						type: 'text',
 						text: [
-							'Analyze the attached academic paper and call savePaperAnalysis exactly once.',
+							'Analyze the academic paper text below and call savePaperAnalysis exactly once.',
 							`Imported filename: ${paper.originalFilename}`,
 							`Current library title (fallback only): ${paper.title}`,
-						].join('\n'),
-					},
-					{
-						type: 'file',
-						mediaType: 'application/pdf',
-						filename: paper.originalFilename,
-						url: pdfDataUrl,
+							'PDF text, extracted locally page by page:',
+							pdfText,
+						].join('\n\n'),
 					},
 				],
 			},
@@ -189,6 +264,7 @@ async function requestPaperAnalysis({
 	});
 	const reader = stream.getReader();
 	let analysis: PaperAiProperties | undefined;
+	logAiEvent('analysis.model_stream.opened', { requestId });
 
 	try {
 		while (true) {
@@ -198,6 +274,18 @@ async function requestPaperAnalysis({
 			}
 
 			const chunk = value as UIMessageChunk;
+			if (
+				chunk.type === 'tool-input-available' ||
+				chunk.type === 'tool-input-error' ||
+				chunk.type === 'finish' ||
+				chunk.type === 'error' ||
+				chunk.type === 'abort'
+			) {
+				logAiPayload('analysis.model_chunk', chunk, {
+					requestId,
+					chunkType: chunk.type,
+				});
+			}
 			if (chunk.type === 'error') {
 				throw new Error(chunk.errorText || 'Paper analysis request failed');
 			}
@@ -211,10 +299,18 @@ async function requestPaperAnalysis({
 				chunk.type === 'tool-input-available' &&
 				chunk.toolName === SAVE_ANALYSIS_TOOL_NAME
 			) {
+				logAiEvent('analysis.tool_input.received', {
+					requestId,
+					toolName: chunk.toolName,
+				});
 				const parsed = paperAnalysisSchema.safeParse(chunk.input);
 				if (!parsed.success) {
 					throw new Error('The AI returned paper data that does not match the schema');
 				}
+				logAiEvent('analysis.tool_input.validated', {
+					requestId,
+					toolName: chunk.toolName,
+				});
 				analysis = {
 					...parsed.data,
 					keywords: normalizeKeywords(parsed.data.keywords),
@@ -231,13 +327,14 @@ async function requestPaperAnalysis({
 	if (!analysis) {
 		throw new Error('The AI did not return a structured paper analysis');
 	}
+	logAiPayload('analysis.model_output', analysis, { requestId });
 
 	return analysis;
 }
 
 const PAPER_ANALYSIS_SYSTEM_PROMPT = `You are a rigorous academic paper analyst.
 
-Analyze only the attached PDF. Never invent bibliographic facts, study details, results, numerical values, limitations, or claims. Use an empty string, empty list, or null when the paper does not provide enough evidence.
+Analyze only the provided text extracted from the paper's PDF. Page boundaries use markers such as "--- Page 1 ---". Never invent bibliographic facts, study details, results, numerical values, limitations, or claims. Use an empty string, empty list, or null when the extracted text does not provide enough evidence.
 
 Output rules:
 - Call savePaperAnalysis exactly once and do not answer with prose outside the tool call.
@@ -249,29 +346,11 @@ Output rules:
 - Preserve the paper's original title, author names, and journal name instead of translating them.
 - keywords must be one combined, deduplicated list. Put every author-supplied keyword first, preserving its original wording and order, then append keywords inferred from the full paper in concise Simplified Chinese.
 - Even when author-supplied keywords exist, append 3 to 5 useful inferred keywords that add concepts not already covered. When the paper has no supplied keywords, generate 5 to 8 keywords from the full paper.
-- Generated keywords must be grounded in the paper and favor specific topics, methods, materials, populations, or application domains. Avoid generic terms such as "research", "paper", "study", or "method".
+- Generated keywords must be grounded in the extracted paper text and favor specific topics, methods, materials, populations, or application domains. Avoid generic terms such as "research", "paper", "study", or "method".
 - Keep authors in publication order and remove affiliations and footnote markers.
 - literatureType must use the closest allowed enum value. Use null only when the type cannot be determined.
 - Distinguish claims made by the authors from your own cautious evaluation, especially for innovations, application value, and limitations.
 - Prefer specific findings and methods over generic language.`;
-
-function arrayBufferToDataUrl(
-	data: ArrayBuffer,
-	mediaType: string,
-): Promise<string> {
-	return new Promise((resolve, reject) => {
-		const reader = new FileReader();
-		reader.onerror = () => reject(reader.error ?? new Error('Could not read PDF'));
-		reader.onload = () => {
-			if (typeof reader.result !== 'string') {
-				reject(new Error('Could not encode PDF'));
-				return;
-			}
-			resolve(reader.result);
-		};
-		reader.readAsDataURL(new Blob([data], { type: mediaType }));
-	});
-}
 
 function normalizeKeywords(keywords: readonly string[]): string[] {
 	const normalized: string[] = [];

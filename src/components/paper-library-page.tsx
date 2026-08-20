@@ -63,6 +63,8 @@ interface ActivePaperAnalysis {
 	progress: number;
 }
 
+type ActivePaperAnalyses = Record<string, ActivePaperAnalysis>;
+
 interface StatusMenuState {
 	paper: PaperRecord;
 	anchor: HTMLButtonElement;
@@ -106,8 +108,7 @@ export function PaperLibraryPage({
 	const [query, setQuery] = useState('');
 	const [isLoading, setIsLoading] = useState(true);
 	const [isImporting, setIsImporting] = useState(false);
-	const [activeAnalysis, setActiveAnalysis] =
-		useState<ActivePaperAnalysis | null>(null);
+	const [, setActiveAnalyses] = useState<ActivePaperAnalyses>({});
 	const [deletingPaperId, setDeletingPaperId] = useState<string | null>(null);
 	const [statusMenu, setStatusMenu] = useState<StatusMenuState | null>(null);
 	const [filterMenu, setFilterMenu] = useState<FilterMenuState | null>(null);
@@ -122,8 +123,7 @@ export function PaperLibraryPage({
 		right: false,
 	});
 	const tableContainerRef = useRef<HTMLDivElement>(null);
-	const activeAnalysisRef = useRef<ActivePaperAnalysis | null>(null);
-	activeAnalysisRef.current = activeAnalysis;
+	const activeAnalysesRef = useRef<ActivePaperAnalyses>({});
 	const deletingPaperIdRef = useRef<string | null>(null);
 	deletingPaperIdRef.current = deletingPaperId;
 	const statusMenuRef = useRef<StatusMenuState | null>(null);
@@ -144,6 +144,17 @@ export function PaperLibraryPage({
 					? current
 					: next,
 			);
+		},
+		[],
+	);
+
+	const updateActiveAnalyses = useCallback(
+		(
+			update: (current: ActivePaperAnalyses) => ActivePaperAnalyses,
+		): void => {
+			const next = update(activeAnalysesRef.current);
+			activeAnalysesRef.current = next;
+			setActiveAnalyses(next);
 		},
 		[],
 	);
@@ -248,7 +259,7 @@ export function PaperLibraryPage({
 
 	const handleAnalyzePaper = useCallback(
 		async (paper: PaperRecord): Promise<void> => {
-			if (activeAnalysisRef.current) {
+			if (activeAnalysesRef.current[paper.id]) {
 				return;
 			}
 
@@ -260,12 +271,15 @@ export function PaperLibraryPage({
 				return;
 			}
 
-			setActiveAnalysis({
-				paperId: paper.id,
-				title: paper.title,
-				stage: 'reading_pdf',
-				progress: 0,
-			});
+			updateActiveAnalyses((current) => ({
+				...current,
+				[paper.id]: {
+					paperId: paper.id,
+					title: paper.title,
+					stage: 'reading_pdf',
+					progress: 0,
+				},
+			}));
 
 			// 36s time constant: the exponential curve reaches ~63% at 36s,
 			// ~95% at ~108s and ~99% at 3 minutes, then holds at 99%.
@@ -274,17 +288,21 @@ export function PaperLibraryPage({
 				autoStart: true,
 			});
 			const progressTimer = window.setInterval(() => {
-				setActiveAnalysis((current) => {
-					if (current?.paperId !== paper.id) {
+				updateActiveAnalyses((current) => {
+					const analysis = current[paper.id];
+					if (!analysis) {
 						return current;
 					}
 
 					return {
 						...current,
-						progress: Math.max(
-							current.progress,
-							Math.min(99, fakeProgress.progress * 100),
-						),
+						[paper.id]: {
+							...analysis,
+							progress: Math.max(
+								analysis.progress,
+								Math.min(99, fakeProgress.progress * 100),
+							),
+						},
 					};
 				});
 			}, 250);
@@ -295,20 +313,28 @@ export function PaperLibraryPage({
 					paper,
 					billingKey,
 					onProgress: (stage) => {
-						setActiveAnalysis((current) =>
-							current?.paperId === paper.id
-								? { ...current, stage }
-								: current,
-						);
+						updateActiveAnalyses((current) => {
+							const analysis = current[paper.id];
+							return analysis
+								? {
+										...current,
+										[paper.id]: { ...analysis, stage },
+									}
+								: current;
+						});
 					},
 				});
 				setPapers((current) => mergePapers(current, [result.paper]));
 				fakeProgress.end();
-				setActiveAnalysis((current) =>
-					current?.paperId === paper.id
-						? { ...current, progress: 100 }
-						: current,
-				);
+				updateActiveAnalyses((current) => {
+					const analysis = current[paper.id];
+					return analysis
+						? {
+								...current,
+								[paper.id]: { ...analysis, progress: 100 },
+							}
+						: current;
+				});
 				// Hold the 100% state briefly so completion is visible before resetting.
 				await new Promise((resolve) => window.setTimeout(resolve, 800));
 				new Notice(
@@ -327,15 +353,21 @@ export function PaperLibraryPage({
 			} finally {
 				fakeProgress.stop();
 				window.clearInterval(progressTimer);
-				setActiveAnalysis(null);
+				updateActiveAnalyses((current) => {
+					const { [paper.id]: _completed, ...remaining } = current;
+					return remaining;
+				});
 			}
 		},
-		[repository, getBillingKey],
+		[repository, getBillingKey, updateActiveAnalyses],
 	);
 
 	const handleDeletePaper = useCallback(
 		async (paper: PaperRecord): Promise<void> => {
-			if (deletingPaperIdRef.current || activeAnalysisRef.current) {
+			if (
+				deletingPaperIdRef.current ||
+				Object.keys(activeAnalysesRef.current).length > 0
+			) {
 				return;
 			}
 
@@ -553,9 +585,9 @@ export function PaperLibraryPage({
 					header: 'Actions',
 					cell: ({ row }) => {
 						const paper = row.original;
-						const analysis = activeAnalysisRef.current;
-						const isActive = analysis?.paperId === paper.id;
-						const isAnotherActive = analysis !== null && !isActive;
+						const activeAnalyses = activeAnalysesRef.current;
+						const analysis = activeAnalyses[paper.id];
+						const isActive = analysis !== undefined;
 						const isAnalyzed = paper.analyzedAt !== null;
 						const isDeleting = deletingPaperIdRef.current === paper.id;
 						return (
@@ -563,7 +595,7 @@ export function PaperLibraryPage({
 								<Button
 									variant={isAnalyzed ? 'ghost' : 'outline'}
 									size="sm"
-									disabled={isAnotherActive || isActive}
+									disabled={isActive}
 									title={
 										isAnalyzed
 											? 'Analyze again (uses credits)'
@@ -598,7 +630,8 @@ export function PaperLibraryPage({
 									size="icon"
 									className="text-muted-foreground hover:text-destructive"
 									disabled={
-										deletingPaperIdRef.current !== null || analysis !== null
+										deletingPaperIdRef.current !== null ||
+										Object.keys(activeAnalyses).length > 0
 									}
 									title="Delete paper"
 									aria-label={`Delete ${paper.title}`}

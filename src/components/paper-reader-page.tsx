@@ -31,12 +31,17 @@ import { App, getLanguage, Notice, TFile } from 'obsidian';
 import { PaperReaderStorage } from '@/papers/paper-reader-storage';
 import {
 	answerPaperQuestion,
-	arrayBufferToDataUrl,
 	buildQaTurnsFromThread,
 	getUnansweredQuestion,
 	QA_BOT_NAME,
 } from '@/ai/paper-qa';
 import { assertAiPdfPageLimit } from '@/ai/pdf-limits';
+import {
+	elapsedMs,
+	logAiEvent,
+	logAiFailure,
+} from '@/ai/ai-logging';
+import { extractOpenPdfText } from '@/papers/pdf-page-count';
 
 const HIDDEN_VIEWER_CATEGORIES = [
 	'document-menu',
@@ -95,7 +100,7 @@ export function PaperReaderPage({
 	const qaQueueRef = useRef<PendingQuestion[]>([]);
 	const qaActiveIdsRef = useRef<Set<string>>(new Set());
 	const qaRunningRef = useRef(false);
-	const pdfDataUrlRef = useRef<string | null>(null);
+	const pdfTextCacheRef = useRef<Map<string, string>>(new Map());
 	const pageTextRunsCacheRef = useRef<
 		Map<string, PdfPageTextRuns>
 	>(new Map());
@@ -237,20 +242,6 @@ export function PaperReaderPage({
 			}, AUTO_SAVE_DEBOUNCE_MS);
 		};
 
-		const getPdfDataUrl = async (): Promise<string> => {
-			if (pdfDataUrlRef.current) {
-				return pdfDataUrlRef.current;
-			}
-			const file = app.vault.getAbstractFileByPath(storage.sourcePdfPath);
-			if (!(file instanceof TFile)) {
-				throw new Error('PDF 文件不存在');
-			}
-			const data = await app.vault.readBinary(file);
-			const dataUrl = await arrayBufferToDataUrl(data, 'application/pdf');
-			pdfDataUrlRef.current = dataUrl;
-			return dataUrl;
-		};
-
 		const processQaQueue = async (): Promise<void> => {
 			if (qaRunningRef.current) {
 				return;
@@ -262,9 +253,22 @@ export function PaperReaderPage({
 					if (!pending) {
 						break;
 					}
+					const requestId = crypto.randomUUID();
+					const startedAt = Date.now();
+					let step = 'prepare_question';
+					logAiEvent('qa.started', {
+						requestId,
+						documentId: pending.documentId,
+						annotationId: pending.annotationId,
+						pageNumber: pending.pageIndex + 1,
+					});
 					try {
 						const billingKey = getBillingKey().trim();
 						if (!billingKey) {
+							logAiEvent('qa.skipped', {
+								requestId,
+								reason: 'missing_billing_key',
+							});
 							new Notice(
 								'请先在插件设置中添加 billing key 后再提问。',
 							);
@@ -276,6 +280,10 @@ export function PaperReaderPage({
 							.getAnnotations()
 							.find((item) => item.object.id === pending.annotationId);
 						if (!tracked) {
+							logAiEvent('qa.skipped', {
+								requestId,
+								reason: 'annotation_not_found',
+							});
 							continue;
 						}
 
@@ -337,9 +345,14 @@ export function PaperReaderPage({
 							open && !open.answer ? open.question : question
 						).trim();
 						if (!newQuestion) {
+							logAiEvent('qa.skipped', {
+								requestId,
+								reason: 'empty_question',
+							});
 							continue;
 						}
 
+						step = 'resolve_pdf_document';
 						const engine = registry.getEngine();
 						const document = documentApi.getDocument(
 							pending.documentId,
@@ -348,6 +361,14 @@ export function PaperReaderPage({
 							throw new Error('PDF 文件尚未准备好');
 						}
 						assertAiPdfPageLimit(document.pageCount);
+						logAiEvent('qa.step.completed', {
+							requestId,
+							step,
+							pageCount: document.pageCount,
+							historyTurns: thread.length,
+						});
+
+						step = 'extract_selected_text';
 						const selectedText = await extractAnnotationText(
 							engine,
 							document,
@@ -358,14 +379,34 @@ export function PaperReaderPage({
 						const context = selectedText
 							? `用户选中了论文第 ${pending.pageIndex + 1} 页中的这段文字：\n${selectedText}`
 							: undefined;
+						logAiEvent('qa.step.completed', {
+							requestId,
+							step,
+							hasSelectedText: Boolean(selectedText),
+							selectedTextCharacters: selectedText.length,
+						});
 
-						const pdfDataUrl = await getPdfDataUrl();
+						step = 'extract_pdf_text';
+						let pdfText = pdfTextCacheRef.current.get(document.id);
+						const textCacheHit = Boolean(pdfText);
+						if (!pdfText) {
+							pdfText = await extractOpenPdfText(engine, document);
+							pdfTextCacheRef.current.set(document.id, pdfText);
+						}
+						logAiEvent('qa.step.completed', {
+							requestId,
+							step,
+							cacheHit: textCacheHit,
+							textCharacters: pdfText.length,
+						});
 						new Notice(
 							`PP 正在回答：${newQuestion.slice(0, 60)}…`,
 						);
+						step = 'request_model';
 						const result = await answerPaperQuestion({
 							billingKey,
-							pdfDataUrl,
+							requestId,
+							pdfText,
 							pdfFilename:
 								pdfPath.split('/').pop() ?? 'paper.pdf',
 							pageCount: document.pageCount,
@@ -378,6 +419,7 @@ export function PaperReaderPage({
 							rootAnnotation?.object.rect ?? tracked.object.rect;
 						const cascadeOffset = replies.length * 16;
 						const replyId = crypto.randomUUID();
+						step = 'save_reply';
 						scope.createAnnotation(pending.pageIndex, {
 							id: replyId,
 							type: PdfAnnotationSubtype.TEXT,
@@ -396,10 +438,23 @@ export function PaperReaderPage({
 							created: new Date(),
 							modified: new Date(),
 						});
+						logAiEvent('qa.completed', {
+							requestId,
+							documentId: pending.documentId,
+							annotationId: pending.annotationId,
+							elapsedMs: elapsedMs(startedAt),
+						});
 						new Notice(
 							`PP 已回答 · ${result.usage.creditsCharged} credit(s) · ${result.usage.remainingCredits} remaining`,
 						);
 					} catch (error) {
+						logAiFailure('qa.failed', error, {
+							requestId,
+							documentId: pending.documentId,
+							annotationId: pending.annotationId,
+							step,
+							elapsedMs: elapsedMs(startedAt),
+						});
 						new Notice(`PP 回答失败：${errorMessage(error)}`);
 					} finally {
 						qaActiveIdsRef.current.delete(pending.annotationId);

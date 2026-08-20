@@ -2,6 +2,11 @@ import {
 	AI_WORKER_BASE_URL,
 	PAPER_MANAGER_PRODUCT_TYPE,
 } from './config';
+import {
+	elapsedMs,
+	logAiEvent,
+	logAiFailure,
+} from './ai-logging';
 import { requestUrl } from 'obsidian';
 
 export interface PaperManagerUsage {
@@ -68,22 +73,52 @@ export async function startPaperManagerUsage({
 		throw new Error('A request ID is required');
 	}
 
-	const response = await requestUrl({
-		url: `${AI_WORKER_BASE_URL}/api/usage/start`,
-		method: 'POST',
-		headers: {
-			'Content-Type': 'application/json',
-		},
-		body: JSON.stringify({
-			key: normalizedKey,
-			productType: PAPER_MANAGER_PRODUCT_TYPE,
+	const startedAt = Date.now();
+	logAiEvent('billing.request.started', {
+		requestId: normalizedRequestId,
+		productType: PAPER_MANAGER_PRODUCT_TYPE,
+	});
+
+	let response;
+	try {
+		response = await requestUrl({
+			url: `${AI_WORKER_BASE_URL}/api/usage/start`,
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+			},
+			body: JSON.stringify({
+				key: normalizedKey,
+				productType: PAPER_MANAGER_PRODUCT_TYPE,
+				requestId: normalizedRequestId,
+			}),
+			throw: false,
+		});
+	} catch (error) {
+		logAiFailure('billing.request.failed', error, {
 			requestId: normalizedRequestId,
-		}),
-		throw: false,
+			elapsedMs: elapsedMs(startedAt),
+		});
+		throw error;
+	}
+
+	logAiEvent('billing.response.received', {
+		requestId: normalizedRequestId,
+		status: response.status,
+		elapsedMs: elapsedMs(startedAt),
 	});
 	const payload = parseJson(response.text);
 
 	if (response.status < 200 || response.status >= 300) {
+		logAiFailure(
+			'billing.response.failed',
+			new Error(billingErrorMessage(payload, response.status)),
+			{
+				requestId: normalizedRequestId,
+				status: response.status,
+				elapsedMs: elapsedMs(startedAt),
+			},
+		);
 		throw new Error(billingErrorMessage(payload, response.status));
 	}
 	if (!isPaperManagerUsage(payload)) {

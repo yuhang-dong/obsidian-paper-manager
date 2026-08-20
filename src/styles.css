@@ -58,7 +58,9 @@
 .paper-manager-root .paper-manager-title-link {
 	appearance: none;
 	display: block;
-	max-width: 36rem;
+	width: 100%;
+	min-width: 0;
+	max-width: 100%;
 	margin: 0;
 	padding: 0;
 	overflow: hidden;
@@ -93,6 +95,7 @@
 
 .paper-manager-library-table {
 	min-width: 1272px;
+	table-layout: fixed;
 	border-collapse: separate;
 	border-spacing: 0;
 }
@@ -101,6 +104,7 @@
 	width: 320px;
 	min-width: 320px;
 	max-width: 320px;
+	overflow: hidden;
 }
 
 .paper-manager-library-table .paper-manager-status-column {
